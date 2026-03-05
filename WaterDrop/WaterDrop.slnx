@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="../WaterDropTests/WaterDropTests.csproj" Id="faf3bd34-bcb0-42dd-9175-632e2e63e100" />
+  <Project Path="../WaterDropTetst/WaterDropTetst.csproj" Id="b4335e97-236d-4dd7-81c7-837ada0f1266" />
+  <Project Path="WaterDrop.csproj" />
+</Solution>
