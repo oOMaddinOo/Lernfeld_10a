@@ -1,4 +1,4 @@
-name: WaterDrop Dev Pipeline
+name: WaterDrop Prod Pipeline
 
 on:
   push:
@@ -37,7 +37,7 @@ jobs:
           dotnet-version: ${{ env.DOTNET_CORE_VERSION }}
 
       - name: Restore
-        run: dotnet restore "${{ env.PROJECT }}"
+        run: dotnet restore "${{ env.WORKING_DIRECTORY }}"
 
       - name: Build
         run: dotnet build "${{ env.PROJECT }}" --configuration ${{ env.CONFIGURATION }} --no-restore
@@ -64,14 +64,15 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_CORE_VERSION }}
 
-      - name: Restore
-        run: dotnet restore "${{ env.PROJECT }}"
+      - name: Restore Solution
+        run: dotnet restore "${{ env.WORKING_DIRECTORY }}"
 
       - name: Build Solution
-        run: dotnet build "${{ env.PROJECT }}" --configuration ${{ env.CONFIGURATION }}
+        run: dotnet build "${{ env.WORKING_DIRECTORY }}" --configuration ${{ env.CONFIGURATION }} --no-restore
 
-      - name: Run Tests
-        run: dotnet test "${{ env.PROJECT }}" --configuration ${{ env.CONFIGURATION }} --no-build --verbosity normal
+      - name: Run Unit Tests
+        run: dotnet test "${{ env.WORKING_DIRECTORY }}" --configuration ${{ env.CONFIGURATION }} --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx"
+    
      
 
   deploy:
@@ -89,7 +90,7 @@ jobs:
       - name: Deploy to Azure WebApp
         uses: azure/webapps-deploy@v2
         with:
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PROD }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
 
       - name: Test deployed WebApp
