@@ -6,8 +6,8 @@ on:
       - master
 
 env:
-  AZURE_WEBAPP_NAME_DEV: ${{ vars.AZURE_WEBAPP_NAME }}
-  AZURE_WEBAPP_LINK_DEV: ${{ vars.AZURE_WEBAPP_LINK }}
+  AZURE_WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+  AZURE_WEBAPP_LINK: ${{ vars.AZURE_WEBAPP_LINK }}
   AZURE_WEBAPP_PACKAGE_PATH: ${{ vars.AZURE_WEBAPP_PACKAGE_PATH }}
   CONFIGURATION: ${{ vars.CONFIGURATION }}
   DOTNET_CORE_VERSION: ${{ vars.DOTNET_CORE_VERSION }}
@@ -25,7 +25,7 @@ jobs:
       - name: Check Environment
         run: |
           echo "🔍 Checking required environment variables..."
-          if [ -z "${{ env.AZURE_WEBAPP_NAME }}" ]; then echo "❌ AZURE_WEBAPP_NAME_DEV is not set"; exit 1; fi
+          if [ -z "${{ env.AZURE_WEBAPP_NAME }}" ]; then echo "❌ AZURE_WEBAPP_NAME is not set"; exit 1; fi
           if [ -z "${{ env.AZURE_WEBAPP_PACKAGE_PATH }}" ]; then echo "❌ AZURE_WEBAPP_PACKAGE_PATH is not set"; exit 1; fi
           if [ -z "${{ env.CONFIGURATION }}" ]; then echo "❌ CONFIGURATION is not set"; exit 1; fi
           if [ -z "${{ env.WORKING_DIRECTORY }}" ]; then echo "❌ WORKING_DIRECTORY is not set"; exit 1; fi
