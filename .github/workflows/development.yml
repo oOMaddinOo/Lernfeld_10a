@@ -72,13 +72,7 @@ jobs:
 
       - name: Run Unit Tests
         run: dotnet test "${{ env.WORKING_DIRECTORY }}" --configuration ${{ env.CONFIGURATION }} --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx"
-      
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        if: always()
-        with:
-          files: '**/test-results.trx'
-          check_name: 'Test Results'
+    
      
 
   deploy:
