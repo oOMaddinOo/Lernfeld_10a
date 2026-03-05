@@ -5,15 +5,147 @@
 <PageTitle>Home</PageTitle>
 
 <h1>Meine Karte</h1>
-<h2>Test</h2>
+
 <div id="map" style="height: 500px; width: 100%;"></div>
 
+<div class="mt-3">
+    <div class="row">
+        <div class="col-md-6">
+            <div class="input-group mb-3">
+                <input type="text" 
+                       class="form-control" 
+                       @bind="cityInput" 
+                       placeholder="Enter city name (e.g., Berlin, München)"
+                       @onkeypress="HandleKeyPress" />
+                <button class="btn btn-success" @onclick="SearchCity">
+                    <i class="bi bi-search"></i> Such in der Stadt
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="btn-group" role="group">
+        <button class="btn btn-warning" @onclick="ClearMap">Clear Map</button>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger mt-3" style="max-width:400px;">@errorMessage</div>
+}
+
+@if (!string.IsNullOrEmpty(successMessage))
+{
+    <div class="alert alert-success mt-3" style="max-width:300px;">@successMessage</div>
+}
+
 @code {
+    private string cityInput = string.Empty;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+
+    async Task SearchCity()
+    {
+        if (string.IsNullOrWhiteSpace(cityInput))
+        {
+            errorMessage = "Geben sie den namen einer Stadt ein.";
+            successMessage = string.Empty;
+            return;
+        }
+
+        await ClearMap();
+        var service = new kloService();
+
+        cityInput = char.ToUpper(cityInput[0]) + cityInput.Substring(1).ToLower();
+
+        // Builder Pattern with User Input
+        var queryBuilder = new ToiletQueryBuilder()
+            .SetCity(cityInput);
+
+        var result = await service.GetToilets(queryBuilder);
+        await DisplayToilets(result, cityInput);
+    }
+
+    async Task ClearMap()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("clearMarkers");
+            errorMessage = string.Empty;
+            successMessage = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error clearing map: {ex.Message}");
+        }
+    }
+
+    async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SearchCity();
+        }
+    }
+
+    async Task DisplayToilets(KloModel result, string cityName)
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+
+        if (result == null)
+        {
+            errorMessage = $"Fehler beim laden von Toiletten daten {cityName}. Probier es noch einmal.";
+            Console.WriteLine("Error: Result is null");
+            return;
+        }
+
+        if (result.Elements == null || result.Elements.Count == 0)
+        {
+            errorMessage = $"Keine Toiletten gefunden in {cityName}.";
+            Console.WriteLine("Warning: No elements found");
+            return;
+        }
+
+        try
+        {
+            int markerCount = 0;
+            foreach (var toilet in result.Elements)
+            {
+                if (toilet.Lat != null && toilet.Lon != null)
+                {
+                    await JS.InvokeVoidAsync("addMarker", toilet.Lat, toilet.Lon, toilet.Type, toilet.Tags ?? new Dictionary<string, string>());
+                    markerCount++;
+                }
+            }
+
+            successMessage = $"{markerCount} Toiletten in {cityName}!";
+
+            if (result.Elements.Count > 0 && result.Elements[0].Lat != null && result.Elements[0].Lon != null)
+            {
+                await JS.InvokeVoidAsync("centerMap", result.Elements[0].Lat, result.Elements[0].Lon);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error displaying toilets: {ex.Message}";
+            Console.WriteLine($"Fehler: {ex.Message}");
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
             await JS.InvokeVoidAsync("initMap", 53.5801097, 9.8859876);
+            cityInput = "Hamburg";
+            var service = new kloService();
+            var queryBuilder = new ToiletQueryBuilder()
+                .SetCity(cityInput);
+
+            var result = await service.GetToilets(queryBuilder);
+            await DisplayToilets(result, cityInput);
+            cityInput = string.Empty;
         }
     }
 }
