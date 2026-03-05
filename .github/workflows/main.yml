@@ -1,0 +1,82 @@
+name: WaterDrop Dev Pipeline
+
+on:
+  push:
+    branches:
+      - master
+
+env:
+  AZURE_WEBAPP_NAME_DEV: ${{ vars.AZURE_WEBAPP_NAME }}
+  AZURE_WEBAPP_LINK_DEV: ${{ vars.AZURE_WEBAPP_LINK }}
+  AZURE_WEBAPP_PACKAGE_PATH: ${{ vars.AZURE_WEBAPP_PACKAGE_PATH }}
+  CONFIGURATION: ${{ vars.CONFIGURATION }}
+  DOTNET_CORE_VERSION: ${{ vars.DOTNET_CORE_VERSION }}
+  WORKING_DIRECTORY: ${{ vars.WORKING_DIRECTORY }}
+  PROJECT: ${{ vars.PROJECT }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: Production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Environment
+        run: |
+          echo "🔍 Checking required environment variables..."
+          if [ -z "${{ env.AZURE_WEBAPP_NAME }}" ]; then echo "❌ AZURE_WEBAPP_NAME_DEV is not set"; exit 1; fi
+          if [ -z "${{ env.AZURE_WEBAPP_PACKAGE_PATH }}" ]; then echo "❌ AZURE_WEBAPP_PACKAGE_PATH is not set"; exit 1; fi
+          if [ -z "${{ env.CONFIGURATION }}" ]; then echo "❌ CONFIGURATION is not set"; exit 1; fi
+          if [ -z "${{ env.WORKING_DIRECTORY }}" ]; then echo "❌ WORKING_DIRECTORY is not set"; exit 1; fi
+          echo "✅ All required environment variables are set."
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_CORE_VERSION }}
+
+      - name: Restore
+        run: dotnet restore "${{ env.PROJECT }}"
+
+      - name: Build
+        run: dotnet build "${{ env.PROJECT }}" --configuration ${{ env.CONFIGURATION }} --no-restore
+
+      - name: Publish
+        run: dotnet publish "${{ env.PROJECT }}" --configuration ${{ env.CONFIGURATION }} --no-build --output "${{ env.AZURE_WEBAPP_PACKAGE_PATH }}"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webapp_publish
+          path: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build 
+    environment: Production
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: webapp_publish
+          path: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+      - name: Deploy to Azure WebApp
+        uses: azure/webapps-deploy@v2
+        with:
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PROD }}
+          package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+      - name: Test deployed WebApp
+        if: success()
+        run: |
+          echo "🧪 Testing WebApp at https://${{ env.AZURE_WEBAPP_LINK }}"
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ env.AZURE_WEBAPP_LINK }})
+          if [ $response -eq 200 ]; then
+            echo "✅ WebApp is running successfully (HTTP $response)"
+          else
+            echo "❌ WebApp returned HTTP $response"
+            exit 1
+          fi
