@@ -71,9 +71,38 @@ jobs:
         run: dotnet build "${{ env.WORKING_DIRECTORY }}" --configuration ${{ env.CONFIGURATION }} --no-restore
 
       - name: Run Unit Tests
-        run: dotnet test "${{ env.WORKING_DIRECTORY }}" --configuration ${{ env.CONFIGURATION }} --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx"
-    
-     
+        run: |
+          echo "⚡ Running Unit Tests (fast)..."
+          dotnet test "${{ env.WORKING_DIRECTORY }}" \
+            --configuration ${{ env.CONFIGURATION }} \
+            --no-build \
+            --verbosity normal \
+            --filter "Category=Unit" \
+            --logger "trx;LogFileName=unit-test-results.trx"
+
+      - name: Upload Unit Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: "**/unit-test-results.trx"
+
+      # - name: Run Integration Tests
+      #   run: |
+      #     echo "🌐 Running Integration Tests (slow - external API calls)..."
+      #     dotnet test "${{ env.WORKING_DIRECTORY }}" \
+      #       --configuration ${{ env.CONFIGURATION }} \
+      #       --no-build \
+      #       --verbosity normal \
+      #       --filter "Category=Integration&FullyQualifiedName!~StressTest" \
+      #       --logger "trx;LogFileName=integration-test-results.trx"
+
+      # - name: Upload Integration Test Results
+      #   if: always()
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: integration-test-results
+      #     path: "**/integration-test-results.trx"
 
   deploy:
     runs-on: ubuntu-latest

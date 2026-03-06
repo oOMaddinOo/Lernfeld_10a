@@ -1,7 +1,8 @@
 ﻿using WaterDrop.Components.Services;
 
-namespace WaterDropTests
+namespace WaterDropTests.UnitTests
 {
+	[Trait("Category", "Unit")]
 	public class KloServiceTests
 	{
 		[Fact]
