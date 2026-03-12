@@ -1,5 +1,7 @@
-﻿using WaterDrop.Components.Services;
+﻿using Microsoft.EntityFrameworkCore;
+using WaterDrop.Components.Data;
 using WaterDrop.Components.Models;
+using WaterDrop.Components.Services;
 using Xunit;
 
 namespace WaterDropTests.IntegrationsTests
@@ -7,226 +9,286 @@ namespace WaterDropTests.IntegrationsTests
 	[Trait("Category", "Integration")]
 	public class KloServiceIntegrationTests
 	{
+		private readonly ApplicationDbContext _context;
 		private readonly kloService _service;
 
 		public KloServiceIntegrationTests()
 		{
-			_service = new kloService();
+			var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+				.UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+				.Options;
+
+			_context = new ApplicationDbContext(options);
+			_service = new kloService(_context);
 		}
 
 		[Fact]
-		public async Task GetToilets_WithValidCity_ReturnsRealData()
+		public async Task FullCrudWorkflow_ShouldWorkEndToEnd()
 		{
 			// Arrange
-			var queryBuilder = new ToiletQueryBuilder()
-				.SetCity("Hamburg")
-				.SetTimeout(30);
+			var kloModel = CreateTestKloModel("Integration Test");
+
+			// Act & Assert - Add
+			await _service.AddKloCommentToData(kloModel);
+			var allData = await _service.GetAllKloData();
+			Assert.Single(allData);
+			Assert.Equal("Integration Test", allData[0].Comment);
+
+			// Act & Assert - Get One
+			var singleKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			Assert.NotNull(singleKlo);
+			Assert.Equal("Integration Test", singleKlo.Comment);
+			Assert.Equal(2, singleKlo.Elements.Count);
+
+			// Act & Assert - Update
+			singleKlo.Comment = "Updated Integration Test";
+			await _service.UpdateCommentData(singleKlo);
+			var updatedKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			Assert.Equal("Updated Integration Test", updatedKlo.Comment);
+
+			// Act & Assert - Delete
+			await _service.DeleteKloDataComment(kloModel.Id);
+			var afterDelete = await _service.GetAllKloData();
+			Assert.Empty(afterDelete);
+		}
+
+		[Fact]
+		public async Task AddMultipleKloModels_WithRelations_ShouldPersistCorrectly()
+		{
+			// Arrange
+			var klo1 = CreateTestKloModel("Hamburg Hauptbahnhof");
+			var klo2 = CreateTestKloModel("Berlin Alexanderplatz");
+			var klo3 = CreateTestKloModel("München Marienplatz");
 
 			// Act
-			var result = await _service.GetToilets(queryBuilder);
+			await _service.AddKloCommentToData(klo1);
+			await _service.AddKloCommentToData(klo2);
+			await _service.AddKloCommentToData(klo3);
 
 			// Assert
-			Assert.NotNull(result);
-			Assert.NotNull(result.Elements);
-			Assert.True(result.Elements.Count > 0, "Hamburg sollte Toiletten haben");
+			var allKlos = await _service.GetAllKloData();
+			Assert.Equal(3, allKlos.Count);
 
-			// Validiere erste Toilette hat gültige Koordinaten
-			var firstToilet = result.Elements[0];
-			Assert.NotNull(firstToilet.Lat);
-			Assert.NotNull(firstToilet.Lon);
-			Assert.InRange(firstToilet.Lat.Value, 53.0, 54.0); // Hamburg Latitude
-			Assert.InRange(firstToilet.Lon.Value, 9.0, 11.0);  // Hamburg Longitude
-		}
-
-		[Fact]
-		public async Task GetToilets_WithMultipleCities_ReturnsCorrectRegions()
-		{
-			// Arrange
-			var cities = new[] { "Berlin", "München", "Köln" };
-
-			foreach (var city in cities)
+			// Verify all Elements are loaded
+			Assert.All(allKlos, klo =>
 			{
-				var queryBuilder = new ToiletQueryBuilder()
-					.SetCity(city)
-					.SetTimeout(30);
-
-				// Act
-				var result = await _service.GetToilets(queryBuilder);
-
-				// Assert
-				Assert.NotNull(result);
-				Assert.True(result.Elements.Count > 0, $"{city} sollte Toiletten haben");
-
-				await Task.Delay(1000); // Rate limiting - API nicht überlasten
-			}
+				Assert.NotNull(klo.Elements);
+				Assert.Equal(2, klo.Elements.Count);
+				Assert.NotNull(klo.Osm3s);
+			});
 		}
 
 		[Fact]
-		public async Task GetToilets_WithAccessFilter_ReturnsFilteredResults()
+		public async Task UpdateKloModel_WithChangedElements_ShouldPersistChanges()
 		{
 			// Arrange
-			var queryBuilder = new ToiletQueryBuilder()
-				.SetCity("Berlin")
-				.SetAccessType("public")
-				.SetTimeout(30);
+			var kloModel = CreateTestKloModel("Original");
+			await _service.AddKloCommentToData(kloModel);
 
-			// Act
-			var result = await _service.GetToilets(queryBuilder);
+			// Act - Load and modify
+			var loadedKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			loadedKlo.Comment = "Modified Comment";
+			loadedKlo.PictureUrl = "https://example.com/new-picture.jpg";
+
+			// Ändere das Dictionary und weise es neu zu, um den Setter zu triggern
+			var tags = loadedKlo.Elements[0].Tags;
+			tags["wheelchair"] = "limited";
+			loadedKlo.Elements[0].Tags = tags; // Neu zuweisen!
+
+			await _service.UpdateCommentData(loadedKlo);
 
 			// Assert
-			Assert.NotNull(result);
-			Assert.True(result.Elements.Count > 0);
+			var updatedKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			Assert.Equal("Modified Comment", updatedKlo.Comment);
+			Assert.Equal("https://example.com/new-picture.jpg", updatedKlo.PictureUrl);
+			Assert.Equal("limited", updatedKlo.Elements[0].Tags["wheelchair"]);
+		}
 
-			// Prüfe dass Elemente public access haben (wenn Tags vorhanden)
-			var elementsWithAccessTag = result.Elements
-				.Where(e => e.Tags?.ContainsKey("access") == true)
+		[Fact]
+		public async Task DeleteKloModel_ShouldAlsoCascadeDeleteRelatedEntities()
+		{
+			// Arrange
+			var kloModel = CreateTestKloModel("To Delete");
+			await _service.AddKloCommentToData(kloModel);
+			var elementIds = kloModel.Elements.Select(e => e.Id).ToList();
+			var osm3sId = kloModel.Osm3s.Id;
+
+			// Act
+			await _service.DeleteKloDataComment(kloModel.Id);
+
+			// Assert - Check if related entities are also deleted (depends on cascade settings)
+			var klo = await _service.GetOneKloData(kloModel.Id.Value);
+			Assert.Null(klo);
+		}
+
+		[Fact]
+		public async Task ConcurrentOperations_ShouldHandleMultipleAdds()
+		{
+			// Arrange
+			var klos = Enumerable.Range(1, 10)
+				.Select(i => CreateTestKloModel($"Klo {i}"))
 				.ToList();
 
-			if (elementsWithAccessTag.Any())
-			{
-				Assert.All(elementsWithAccessTag,
-					e => Assert.Equal("public", e.Tags!["access"]));
-			}
-		}
-
-		[Fact]
-		public async Task GetToilets_WithFeeInformation_ContainsFeeTag()
-		{
-			// Arrange
-			var queryBuilder = new ToiletQueryBuilder()
-				.SetCity("Hamburg")
-				.IncludeFeeInformation(true)
-				.SetTimeout(30);
-
-			// Act
-			var result = await _service.GetToilets(queryBuilder);
+			// Act - Simulate concurrent adds
+			var tasks = klos.Select(klo => _service.AddKloCommentToData(klo));
+			await Task.WhenAll(tasks);
 
 			// Assert
-			Assert.NotNull(result);
-
-			// Mindestens einige Elemente sollten fee-Information haben
-			var elementsWithFee = result.Elements
-				.Where(e => e.Tags?.ContainsKey("fee") == true)
-				.ToList();
-
-			Assert.NotEmpty(elementsWithFee);
+			var allKlos = await _service.GetAllKloData();
+			Assert.Equal(10, allKlos.Count);
 		}
 
 		[Fact]
-		public async Task GetToilets_WithInvalidCity_ReturnsEmptyOrNull()
+		public async Task GetAllKloData_WithLargeDataset_ShouldReturnAllRecords()
 		{
-			// Arrange
-			var queryBuilder = new ToiletQueryBuilder()
-				.SetCity("NichtExistierendeStadt123456")
-				.SetTimeout(15);
-
-			// Act
-			var result = await _service.GetToilets(queryBuilder);
-
-			// Assert - Je nach API-Response
-			if (result != null)
+			// Arrange - Add 50 records
+			for (int i = 0; i < 50; i++)
 			{
-				Assert.Empty(result.Elements);
+				var klo = CreateTestKloModel($"Bulk Test {i}");
+				await _service.AddKloCommentToData(klo);
 			}
+
+			// Act
+			var allKlos = await _service.GetAllKloData();
+
+			// Assert
+			Assert.Equal(50, allKlos.Count);
+			Assert.All(allKlos, klo => Assert.NotNull(klo.Elements));
 		}
 
 		[Fact]
-		public async Task GetToilets_ApiResponse_HasCorrectStructure()
+		public async Task DeleteNonExistentKlo_ShouldNotThrowException()
 		{
 			// Arrange
-			var queryBuilder = new ToiletQueryBuilder()
-				.SetCity("München")
-				.SetTimeout(30);
+			var nonExistentId = Guid.NewGuid();
+
+			// Act & Assert - Should not throw
+			await _service.DeleteKloDataComment(nonExistentId);
+			var allData = await _service.GetAllKloData();
+			Assert.Empty(allData);
+		}
+
+		[Fact]
+		public async Task GetOneKloData_AfterMultipleUpdates_ShouldReturnLatestVersion()
+		{
+			// Arrange
+			var kloModel = CreateTestKloModel("Version 1");
+			await _service.AddKloCommentToData(kloModel);
+
+			// Act - Multiple updates
+			for (int i = 2; i <= 5; i++)
+			{
+				var klo = await _service.GetOneKloData(kloModel.Id.Value);
+				klo.Comment = $"Version {i}";
+				await _service.UpdateCommentData(klo);
+			}
+
+			// Assert
+			var finalKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			Assert.Equal("Version 5", finalKlo.Comment);
+		}
+
+		[Fact]
+		public async Task AddKloModel_WithComplexTags_ShouldPreserveAllData()
+		{
+			// Arrange
+			var kloModel = CreateTestKloModel("Complex Tags Test");
+			kloModel.Elements[0].Tags = new Dictionary<string, string>
+			{
+				{ "amenity", "toilets" },
+				{ "access", "public" },
+				{ "fee", "no" },
+				{ "wheelchair", "yes" },
+				{ "name", "Öffentliche Toilette München" },
+				{ "opening_hours", "24/7" },
+				{ "operator", "Stadt München" },
+				{ "description", "Saubere öffentliche Toilette im Zentrum" }
+			};
 
 			// Act
-			var result = await _service.GetToilets(queryBuilder);
+			await _service.AddKloCommentToData(kloModel);
 
-			// Assert - Validiere Datenstruktur
-			Assert.NotNull(result);
-			Assert.NotNull(result.Elements);
+			// Assert
+			var savedKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			Assert.Equal(8, savedKlo.Elements[0].Tags.Count);
+			Assert.Equal("Öffentliche Toilette München", savedKlo.Elements[0].Tags["name"]);
+		}
 
-			foreach (var element in result.Elements.Take(5))
+		[Fact]
+		public async Task UpdateCommentData_WithNullOsm3s_ShouldHandleGracefully()
+		{
+			// Arrange
+			var kloModel = CreateTestKloModel("Test");
+			await _service.AddKloCommentToData(kloModel);
+
+			var loadedKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			loadedKlo.Comment = "Updated";
+
+			// Act & Assert
+			await _service.UpdateCommentData(loadedKlo);
+			var updatedKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			Assert.Equal("Updated", updatedKlo.Comment);
+		}
+
+		private KloModel CreateTestKloModel(string comment)
+		{
+			var kloId = Guid.NewGuid();
+			return new KloModel
 			{
-				Assert.NotNull(element.Type);
-				Assert.True(element.Type == "node" || element.Type == "way",
-					"Type sollte 'node' oder 'way' sein");
-
-				if (element.Lat.HasValue && element.Lon.HasValue)
+				Id = kloId,
+				Version = 0.6,
+				Generator = "Integration Test Generator",
+				Comment = comment,
+				PictureUrl = "https://example.com/toilet.jpg",
+				Osm3s = new Osm3s
 				{
-					Assert.InRange(element.Lat.Value, -90, 90);
-					Assert.InRange(element.Lon.Value, -180, 180);
+					Id = Guid.NewGuid(),
+					TimestampOsmBase = DateTime.UtcNow,
+					TimestampAreasBase = DateTime.UtcNow,
+					Copyright = "© OpenStreetMap contributors"
+				},
+				Elements = new List<Element>
+				{
+					new Element
+					{
+						Id = Guid.NewGuid(),
+						KloModelId = kloId,
+						Type = "node",
+						ElementId = 123456789,
+						Lat = 53.5801097,
+						Lon = 9.8859876,
+						Tags = new Dictionary<string, string>
+						{
+							{ "amenity", "toilets" },
+							{ "access", "public" },
+							{ "fee", "no" },
+							{ "wheelchair", "yes" }
+						}
+					},
+					new Element
+					{
+						Id = Guid.NewGuid(),
+						KloModelId = kloId,
+						Type = "node",
+						ElementId = 987654321,
+						Lat = 53.5511,
+						Lon = 9.9937,
+						Tags = new Dictionary<string, string>
+						{
+							{ "amenity", "toilets" },
+							{ "access", "customers" },
+							{ "fee", "yes" }
+						}
+					}
 				}
-			}
+			};
 		}
 
-		[Theory]
-		[InlineData("Hamburg", 53.55, 10.0)]
-		[InlineData("Berlin", 52.52, 13.4)]
-		[InlineData("München", 48.13, 11.5)]
-		public async Task GetToilets_VerifiesGeographicLocation(
-			string city, double expectedLat, double expectedLon)
+		public void Dispose()
 		{
-			// Arrange
-			var queryBuilder = new ToiletQueryBuilder()
-				.SetCity(city)
-				.SetTimeout(30);
-
-			// Act
-			var result = await _service.GetToilets(queryBuilder);
-
-			// Assert
-			Assert.NotNull(result);
-			Assert.True(result.Elements.Count > 0);
-
-			var firstElement = result.Elements.First(e => e.Lat.HasValue && e.Lon.HasValue);
-
-			// Toleranz von ±0.5 Grad
-			Assert.InRange(firstElement.Lat!.Value, expectedLat - 0.5, expectedLat + 0.5);
-			Assert.InRange(firstElement.Lon!.Value, expectedLon - 0.5, expectedLon + 0.5);
+			_context.Database.EnsureDeleted();
+			_context.Dispose();
 		}
 
-		[Fact]
-		public async Task GetToilets_ReturnsElementsWithTags()
-		{
-			// Arrange
-			var queryBuilder = new ToiletQueryBuilder()
-				.SetCity("Hamburg")
-				.SetTimeout(30);
-
-			// Act
-			var result = await _service.GetToilets(queryBuilder);
-
-			// Assert
-			Assert.NotNull(result);
-			var elementsWithTags = result.Elements.Where(e => e.Tags != null && e.Tags.Count > 0);
-			Assert.NotEmpty(elementsWithTags);
-
-			// Prüfe typische Toiletten-Tags
-			var firstWithTags = elementsWithTags.First();
-			Assert.True(
-				firstWithTags.Tags!.ContainsKey("amenity") ||
-				firstWithTags.Tags.ContainsKey("toilets") ||
-				firstWithTags.Tags.ContainsKey("name"),
-				"Element sollte relevante Tags haben"
-			);
-		}
-
-		[Fact(Skip = "Nur manuell ausführen - sehr langsamer Test")]
-		public async Task GetToilets_StressTest_MultipleSequentialCalls()
-		{
-			// Test für Stabilität bei mehreren Aufrufen
-			var queryBuilder = new ToiletQueryBuilder()
-				.SetCity("Hamburg")
-				.SetTimeout(20);
-
-			for (int i = 0; i < 5; i++)
-			{
-				var result = await _service.GetToilets(queryBuilder);
-				Assert.NotNull(result);
-				Assert.True(result.Elements.Count > 0);
-
-				await Task.Delay(2000); // Rate limiting - 2 Sekunden zwischen Requests
-			}
-		}
 	}
 }

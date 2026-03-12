@@ -1,5 +1,6 @@
 ﻿@page "/"
 @inject IJSRuntime JS
+@inject kloService kloService
 @rendermode InteractiveServer
 
 <PageTitle>Home</PageTitle>
@@ -20,6 +21,10 @@
                 <button class="btn btn-success" @onclick="SearchCity">
                     <i class="bi bi-search"></i> Such in der Stadt
                 </button>
+                <button @onclick="AddToCommentToDatabase">In Datenbank Testen</button>
+                <button @onclick="UpdateComment"> Klo Aktualisieren</button>
+                <button @onclick="LoadAllToilets">Alle Toiletten Laden</button>
+                <button @onclick="DeleteComment"> Klo Löschen</button>
             </div>
         </div>
     </div>
@@ -27,6 +32,33 @@
     <div class="btn-group" role="group">
         <button class="btn btn-warning" @onclick="ClearMap">Clear Map</button>
     </div>
+</div>
+
+<div>
+   <table>
+       <thead>
+        <th>Id</th>
+        <th>Kommentar</th>
+        <thead>Tags</thead>
+       </thead>
+       <tbody>
+           @if(allKloData.Any())
+            {
+                @foreach(var klo in allKloData)
+                {
+                    <tr>
+                        <td>@klo.Id</td>
+                        <td>@klo.Comment</td>
+                        @foreach(var element in klo.Elements)
+                        {
+                            <td>@element.TagsJson</td>
+                            <td>@element.Tags</td>
+                        }
+                    </tr>
+                }
+            }
+        </tbody>
+   </table>
 </div>
 
 @if (!string.IsNullOrEmpty(errorMessage))
@@ -43,6 +75,8 @@
     private string cityInput = string.Empty;
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
+    private KloModel kloData = new KloModel();
+    private List<KloModel> allKloData = new List<KloModel>();
 
     async Task SearchCity()
     {
@@ -54,7 +88,6 @@
         }
 
         await ClearMap();
-        var service = new kloService();
 
         cityInput = char.ToUpper(cityInput[0]) + cityInput.Substring(1).ToLower();
 
@@ -62,7 +95,7 @@
         var queryBuilder = new ToiletQueryBuilder()
             .SetCity(cityInput);
 
-        var result = await service.GetToilets(queryBuilder);
+        var result = await kloService.GetToilets(queryBuilder);
         await DisplayToilets(result, cityInput);
     }
 
@@ -133,17 +166,139 @@
         }
     }
 
+    public async Task LoadAllToilets()
+    {
+        try
+        {
+            allKloData.Clear();
+            List<KloModel> allToilets = await kloService.GetAllKloData();
+            foreach(var klo in allToilets)
+            {
+                allKloData.Add(klo);
+                successMessage = "Alle Toiletten erfolgreich aus der Datenbank geladen";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Fehler beim Laden aller Toiletten aus der Datenbank: {ex.Message}";
+        }
+    }
+
+    public async Task DeleteComment()
+    {
+        try
+        {
+
+            var toilets = await kloService.GetAllKloData();
+            foreach(var klo in toilets)
+            {         
+                await kloService.DeleteKloDataComment(klo.Id);
+                successMessage = "Alle Kommentare erfolgreich gelöscht!";
+            }
+        }
+        catch
+        (Exception ex)
+        {
+            errorMessage = $"Fehler beim Löschen der Kommentare: {ex.Message}";
+        }
+    }
+
+    public async Task UpdateComment()
+    {
+        try
+        {           
+            Guid guid = new Guid("5f9b6f53-64bd-4472-9d81-40e716163be4");
+            var klo = await kloService.GetOneKloData(guid);
+            
+            klo.Comment = "Dieser Kommentar wurde aktualisiert!";
+            await kloService.UpdateCommentData(klo);
+
+            successMessage = "Kommentar erfolgreich aktualisiert!";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Fehler beim Aktualisieren des Kommentars: {ex.Message}";
+        }
+    }
+
+    public async Task AddToCommentToDatabase()
+    {
+        string comment = "Ich habe diese Toilette benutzt und sie war sauber!";
+        kloData.Comment = comment;
+
+        kloData = new KloModel
+        {
+            Id = Guid.NewGuid(),
+            Version = 0.6,
+            Generator = "Test Generator",
+            Comment = comment,
+            PictureUrl = "https://example.com/toilet.jpg",
+            Osm3s = new Osm3s
+            {
+                Id = Guid.NewGuid(),
+                TimestampOsmBase = DateTime.UtcNow,
+                TimestampAreasBase = DateTime.UtcNow,
+                Copyright = "© OpenStreetMap contributors"
+            },
+            Elements = new List<Element>
+        {
+            new Element
+            {
+                Id = Guid.NewGuid(),
+                KloModelId = kloData.Id,
+                Type = "node",
+                ElementId = 123456789,
+                Lat = 53.5801097,
+                Lon = 9.8859876,
+                Tags = new Dictionary<string, string>
+                {
+                    { "amenity", "toilets" },
+                    { "access", "public" },
+                    { "fee", "no" },
+                    { "wheelchair", "yes" },
+                    { "name", "Test Toilet Hamburg" }
+                }
+            },
+            new Element
+            {
+                KloModelId = kloData.Id,
+                 Id = Guid.NewGuid(),
+                Type = "node",
+                ElementId = 987654321,
+                Lat = 53.5511,
+                Lon = 9.9937,
+                Tags = new Dictionary<string, string>
+                {
+                    { "amenity", "toilets" },
+                    { "access", "customers" },
+                    { "fee", "yes" }
+                }
+            }
+        }
+        };
+        try
+        {
+            await kloService.AddKloCommentToData(kloData);
+            successMessage = "Kommentar erfolgreich zur Datenbank hinzugefügt!";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Fehler beim Hinzufügen des Kommentars: {ex.Message}";
+        }
+    }
+
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
             await JS.InvokeVoidAsync("initMap", 53.5801097, 9.8859876);
             cityInput = "Hamburg";
-            var service = new kloService();
+
             var queryBuilder = new ToiletQueryBuilder()
                 .SetCity(cityInput);
 
-            var result = await service.GetToilets(queryBuilder);
+            var result = await kloService.GetToilets(queryBuilder);
             await DisplayToilets(result, cityInput);
             cityInput = string.Empty;
         }
