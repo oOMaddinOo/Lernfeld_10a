@@ -41,9 +41,6 @@ namespace WaterDrop.Components.Data
 				// TagsJson wird als JSON gespeichert, Tags wird ignoriert
 				entity.Ignore(e => e.Tags);
 				
-				entity.Property(e => e.TagsJson)
-					.HasColumnName("Tags")
-					.HasColumnType("nvarchar(max)");
 			});
 
 			// Osm3s Konfiguration

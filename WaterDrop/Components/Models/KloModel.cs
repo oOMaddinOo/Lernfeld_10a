@@ -63,16 +63,9 @@ namespace WaterDrop.Components.Models
 		[JsonProperty("lon")]
 		public double? Lon { get; set; }
 
+		// Dynamische Tags
 		[JsonProperty("tags")]
-		[Column(TypeName = "nvarchar(max)")]
-		public string TagsJson { get; set; }
-
-		[NotMapped]
-		public Dictionary<string, string> Tags
-		{
-			get => string.IsNullOrEmpty(TagsJson) ? new() : JsonConvert.DeserializeObject<Dictionary<string, string>>(TagsJson);
-			set => TagsJson = JsonConvert.SerializeObject(value);
-		}
+		public Dictionary<string, string> Tags { get; set; }
 
 		[ForeignKey("KloModel")]
 		public Guid? KloModelId { get; set; }

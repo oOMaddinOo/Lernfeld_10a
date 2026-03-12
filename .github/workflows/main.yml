@@ -24,12 +24,12 @@ jobs:
 
       - name: Check Environment
         run: |
-          echo "🔍 Checking required environment variables..."
-          if [ -z "${{ env.AZURE_WEBAPP_NAME }}" ]; then echo "❌ AZURE_WEBAPP_NAME is not set"; exit 1; fi
-          if [ -z "${{ env.AZURE_WEBAPP_PACKAGE_PATH }}" ]; then echo "❌ AZURE_WEBAPP_PACKAGE_PATH is not set"; exit 1; fi
-          if [ -z "${{ env.CONFIGURATION }}" ]; then echo "❌ CONFIGURATION is not set"; exit 1; fi
-          if [ -z "${{ env.WORKING_DIRECTORY }}" ]; then echo "❌ WORKING_DIRECTORY is not set"; exit 1; fi
-          echo "✅ All required environment variables are set."
+          echo "Checking required environment variables..."
+          if [ -z "${{ env.AZURE_WEBAPP_NAME }}" ]; then echo " AZURE_WEBAPP_NAME is not set"; exit 1; fi
+          if [ -z "${{ env.AZURE_WEBAPP_PACKAGE_PATH }}" ]; then echo "AZURE_WEBAPP_PACKAGE_PATH is not set"; exit 1; fi
+          if [ -z "${{ env.CONFIGURATION }}" ]; then echo " CONFIGURATION is not set"; exit 1; fi
+          if [ -z "${{ env.WORKING_DIRECTORY }}" ]; then echo " WORKING_DIRECTORY is not set"; exit 1; fi
+          echo " All required environment variables are set."
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
@@ -71,9 +71,38 @@ jobs:
         run: dotnet build "${{ env.WORKING_DIRECTORY }}" --configuration ${{ env.CONFIGURATION }} --no-restore
 
       - name: Run Unit Tests
-        run: dotnet test "${{ env.WORKING_DIRECTORY }}" --configuration ${{ env.CONFIGURATION }} --no-build --verbosity normal --logger "trx;LogFileName=test-results.trx"
-    
-     
+        run: |
+          echo " Running Unit Tests (fast)..."
+          dotnet test "${{ env.WORKING_DIRECTORY }}" \
+            --configuration ${{ env.CONFIGURATION }} \
+            --no-build \
+            --verbosity normal \
+            --filter "Category=Unit" \
+            --logger "trx;LogFileName=unit-test-results.trx"
+
+      - name: Upload Unit Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: "**/unit-test-results.trx"
+
+      - name: Run Integration Tests
+        run: |
+          echo " Running Integration Tests (slow - external API calls)..."
+          dotnet test "${{ env.WORKING_DIRECTORY }}" \
+            --configuration ${{ env.CONFIGURATION }} \
+            --no-build \
+            --verbosity normal \
+            --filter "Category=Integration&FullyQualifiedName!~StressTest" \
+            --logger "trx;LogFileName=integration-test-results.trx"
+
+      - name: Upload Integration Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: "**/integration-test-results.trx"
 
   deploy:
     runs-on: ubuntu-latest
@@ -96,11 +125,11 @@ jobs:
       - name: Test deployed WebApp
         if: success()
         run: |
-          echo "🧪 Testing WebApp at https://${{ env.AZURE_WEBAPP_LINK }}"
+          echo " Testing WebApp at https://${{ env.AZURE_WEBAPP_LINK }}"
           response=$(curl -s -o /dev/null -w "%{http_code}" https://${{ env.AZURE_WEBAPP_LINK }})
           if [ $response -eq 200 ]; then
-            echo "✅ WebApp is running successfully (HTTP $response)"
+            echo " WebApp is running successfully (HTTP $response)"
           else
-            echo "❌ WebApp returned HTTP $response"
+            echo " WebApp returned HTTP $response"
             exit 1
           fi

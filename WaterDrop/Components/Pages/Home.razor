@@ -25,6 +25,7 @@
                 <button @onclick="UpdateComment"> Klo Aktualisieren</button>
                 <button @onclick="LoadAllToilets">Alle Toiletten Laden</button>
                 <button @onclick="DeleteComment"> Klo Löschen</button>
+                <button @onclick="loadOneKlo">Ein Klo Laden</button>
             </div>
         </div>
     </div>
@@ -39,7 +40,7 @@
        <thead>
         <th>Id</th>
         <th>Kommentar</th>
-        <thead>Tags</thead>
+        <th>Tags</th>
        </thead>
        <tbody>
            @if(allKloData.Any())
@@ -51,7 +52,6 @@
                         <td>@klo.Comment</td>
                         @foreach(var element in klo.Elements)
                         {
-                            <td>@element.TagsJson</td>
                             <td>@element.Tags</td>
                         }
                     </tr>
@@ -193,8 +193,10 @@
             foreach(var klo in toilets)
             {         
                 await kloService.DeleteKloDataComment(klo.Id);
-                successMessage = "Alle Kommentare erfolgreich gelöscht!";
+                successMessage = "Klo erfolgreich gelöscht!";
+                break;
             }
+            await LoadAllToilets();
         }
         catch
         (Exception ex)
@@ -203,15 +205,28 @@
         }
     }
 
+    public async Task loadOneKlo()
+    {
+        allKloData.Clear();
+        var toilets = await kloService.GetAllKloData();
+        foreach (var klo in toilets)
+        {
+            allKloData.Add(klo);
+            break;
+        }
+    }
+
     public async Task UpdateComment()
     {
         try
-        {           
-            Guid guid = new Guid("5f9b6f53-64bd-4472-9d81-40e716163be4");
-            var klo = await kloService.GetOneKloData(guid);
-            
-            klo.Comment = "Dieser Kommentar wurde aktualisiert!";
-            await kloService.UpdateCommentData(klo);
+        {       
+            var toilets = await kloService.GetAllKloData();
+            foreach(var klo in toilets)
+            {
+                klo.Comment = "Dieser Kommentar wurde aktualisiert!";
+                await kloService.UpdateCommentData(klo);
+                break;
+            }
 
             successMessage = "Kommentar erfolgreich aktualisiert!";
         }
@@ -247,7 +262,7 @@
                 Id = Guid.NewGuid(),
                 KloModelId = kloData.Id,
                 Type = "node",
-                ElementId = 123456789,
+                ElementId = 9106108125,
                 Lat = 53.5801097,
                 Lon = 9.8859876,
                 Tags = new Dictionary<string, string>
@@ -258,21 +273,6 @@
                     { "wheelchair", "yes" },
                     { "name", "Test Toilet Hamburg" }
                 }
-            },
-            new Element
-            {
-                KloModelId = kloData.Id,
-                 Id = Guid.NewGuid(),
-                Type = "node",
-                ElementId = 987654321,
-                Lat = 53.5511,
-                Lon = 9.9937,
-                Tags = new Dictionary<string, string>
-                {
-                    { "amenity", "toilets" },
-                    { "access", "customers" },
-                    { "fee", "yes" }
-                }
             }
         }
         };
@@ -280,6 +280,7 @@
         {
             await kloService.AddKloCommentToData(kloData);
             successMessage = "Kommentar erfolgreich zur Datenbank hinzugefügt!";
+            await LoadAllToilets();
         }
         catch (Exception ex)
         {
