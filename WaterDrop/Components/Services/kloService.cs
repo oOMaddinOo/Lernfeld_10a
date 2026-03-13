@@ -1,5 +1,4 @@
-﻿using Azure.Identity;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json;
 using WaterDrop.Components.Data;
 using WaterDrop.Components.Models;
@@ -9,7 +8,7 @@ namespace WaterDrop.Components.Services
 	public class kloService
 	{
 		private static readonly HttpClient _httpClient = new HttpClient();
-		private static ApplicationDbContext _context;
+		private ApplicationDbContext _context;
 
 		public kloService(ApplicationDbContext context)
 		{
@@ -63,15 +62,22 @@ namespace WaterDrop.Components.Services
 		}
 
 
-		public async Task AddKloCommentToData(KloModel klomodel)
+		public async Task AddKloCommentToData(DatabaseKloModel klomodel)
 		{
-			_context.KloModel.Add(klomodel);
+			_context.DatabaseKloModel.Add(klomodel);
 			await _context.SaveChangesAsync();
 		}
 
-		public async Task<List<KloModel>> GetAllKloData()
+		public async Task<List<DatabaseKloModel>> GetAllKloData()
 		{
-			return await _context.KloModel.Include(k => k.Elements).Include(k => k.Osm3s).ToListAsync();
+			return await _context.DatabaseKloModel.ToListAsync();
+		}
+
+		public async Task<DatabaseKloModel> GetKloByElementId(long elementId)
+		{
+			return await _context.DatabaseKloModel
+		.Where(e => e.ElementId == elementId)
+		.FirstOrDefaultAsync();
 		}
 
 		public async Task DeleteKloDataComment(Guid? kloId)
@@ -81,26 +87,26 @@ namespace WaterDrop.Components.Services
 				throw new ArgumentNullException(nameof(kloId));
 			}
 
-			var klo = await _context.KloModel.FindAsync(kloId);
+			var klo = await _context.DatabaseKloModel.FindAsync(kloId);
 
 			if (klo == null)
 			{
 				return;
 			}
 
-			_context.KloModel.Remove(klo);
+			_context.DatabaseKloModel.Remove(klo);
 			await _context.SaveChangesAsync();
 		}
 
-		public async Task UpdateCommentData(KloModel kloModel)
+		public async Task UpdateCommentData(DatabaseKloModel kloModel)
 		{
-			_context.KloModel.Update(kloModel);
+			_context.DatabaseKloModel.Update(kloModel);
 			await _context.SaveChangesAsync();
 		}
 
-		public async Task<KloModel?> GetOneKloData(Guid kloId)
+		public async Task<DatabaseKloModel?> GetOneKloData(Guid kloId)
 		{
-			return await _context.KloModel.Include(k => k.Elements).Include(k => k.Osm3s).FirstOrDefaultAsync(k => k.Id == kloId);
+			return await _context.DatabaseKloModel.FirstOrDefaultAsync(k => k.Id == kloId);
 		}
 	}
 }

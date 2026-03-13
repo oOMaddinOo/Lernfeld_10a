@@ -13,7 +13,7 @@
     <div class="row">
         <div class="col-md-6">
             <div class="input-group mb-3">
-                <input type="text" 
+                <input width="400" type="text" 
                        class="form-control" 
                        @bind="cityInput" 
                        placeholder="Enter city name (e.g., Berlin, München)"
@@ -21,7 +21,7 @@
                 <button class="btn btn-success" @onclick="SearchCity">
                     <i class="bi bi-search"></i> Such in der Stadt
                 </button>
-                <button @onclick="AddToCommentToDatabase">In Datenbank Testen</button>
+                <button @onclick="AddToCommentToDatabase">Ein Eintrag Erstellen</button>
                 <button @onclick="UpdateComment"> Klo Aktualisieren</button>
                 <button @onclick="LoadAllToilets">Alle Toiletten Laden</button>
                 <button @onclick="DeleteComment"> Klo Löschen</button>
@@ -40,7 +40,7 @@
        <thead>
         <th>Id</th>
         <th>Kommentar</th>
-        <th>Tags</th>
+        <th>ElementId</th>
        </thead>
        <tbody>
            @if(allKloData.Any())
@@ -50,10 +50,8 @@
                     <tr>
                         <td>@klo.Id</td>
                         <td>@klo.Comment</td>
-                        @foreach(var element in klo.Elements)
-                        {
-                            <td>@element.Tags</td>
-                        }
+                        <td>@klo.ElementId</td>
+                        <td>@klo.PictureUrl</td>
                     </tr>
                 }
             }
@@ -75,8 +73,8 @@
     private string cityInput = string.Empty;
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
-    private KloModel kloData = new KloModel();
-    private List<KloModel> allKloData = new List<KloModel>();
+    private DatabaseKloModel kloData = new DatabaseKloModel();
+    private List<DatabaseKloModel> allKloData = new List<DatabaseKloModel>();
 
     async Task SearchCity()
     {
@@ -96,7 +94,8 @@
             .SetCity(cityInput);
 
         var result = await kloService.GetToilets(queryBuilder);
-        await DisplayToilets(result, cityInput);
+        var kloData = await kloService.GetAllKloData();
+        await DisplayToilets(result, cityInput, kloData);
     }
 
     async Task ClearMap()
@@ -121,7 +120,7 @@
         }
     }
 
-    async Task DisplayToilets(KloModel result, string cityName)
+    async Task DisplayToilets(KloModel result, string cityName, List<DatabaseKloModel> kloModels)
     {
         errorMessage = string.Empty;
         successMessage = string.Empty;
@@ -145,9 +144,23 @@
             int markerCount = 0;
             foreach (var toilet in result.Elements)
             {
+                string comment = "Kein Kommentar";
+                string picture = "Kein Bild";
+                var kloData = await  kloService.GetKloByElementId(toilet.ElementId);
+
+                if (kloData != null &&  kloData.Comment != null )
+                {
+                    comment = kloData.Comment ;
+                }
+
+                if(kloData != null && kloData.PictureUrl != null)
+                {
+                    picture = kloData.PictureUrl;
+                }
+
                 if (toilet.Lat != null && toilet.Lon != null)
                 {
-                    await JS.InvokeVoidAsync("addMarker", toilet.Lat, toilet.Lon, toilet.Type, toilet.Tags ?? new Dictionary<string, string>());
+                    await JS.InvokeVoidAsync("addMarker", toilet.ElementId, toilet.Lat, toilet.Lon, toilet.Type, toilet.Tags ?? new Dictionary<string, string>(), comment, picture);
                     markerCount++;
                 }
             }
@@ -171,7 +184,7 @@
         try
         {
             allKloData.Clear();
-            List<KloModel> allToilets = await kloService.GetAllKloData();
+            List<DatabaseKloModel> allToilets = await kloService.GetAllKloData();
             foreach(var klo in allToilets)
             {
                 allKloData.Add(klo);
@@ -223,7 +236,7 @@
             var toilets = await kloService.GetAllKloData();
             foreach(var klo in toilets)
             {
-                klo.Comment = "Dieser Kommentar wurde aktualisiert!";
+                klo.Comment = "Das geilste Klo das ich jemals hatte!!!";
                 await kloService.UpdateCommentData(klo);
                 break;
             }
@@ -241,40 +254,13 @@
         string comment = "Ich habe diese Toilette benutzt und sie war sauber!";
         kloData.Comment = comment;
 
-        kloData = new KloModel
+        kloData = new DatabaseKloModel
         {
             Id = Guid.NewGuid(),
-            Version = 0.6,
-            Generator = "Test Generator",
+           
             Comment = comment,
-            PictureUrl = "https://example.com/toilet.jpg",
-            Osm3s = new Osm3s
-            {
-                Id = Guid.NewGuid(),
-                TimestampOsmBase = DateTime.UtcNow,
-                TimestampAreasBase = DateTime.UtcNow,
-                Copyright = "© OpenStreetMap contributors"
-            },
-            Elements = new List<Element>
-        {
-            new Element
-            {
-                Id = Guid.NewGuid(),
-                KloModelId = kloData.Id,
-                Type = "node",
-                ElementId = 9106108125,
-                Lat = 53.5801097,
-                Lon = 9.8859876,
-                Tags = new Dictionary<string, string>
-                {
-                    { "amenity", "toilets" },
-                    { "access", "public" },
-                    { "fee", "no" },
-                    { "wheelchair", "yes" },
-                    { "name", "Test Toilet Hamburg" }
-                }
-            }
-        }
+            PictureUrl = "https://waterdropstorage.blob.core.windows.net/picture/golden-toilet.jpg",
+            ElementId = 9106108128
         };
         try
         {
@@ -299,8 +285,10 @@
             var queryBuilder = new ToiletQueryBuilder()
                 .SetCity(cityInput);
 
+            var dataToilets = await kloService.GetAllKloData();
+
             var result = await kloService.GetToilets(queryBuilder);
-            await DisplayToilets(result, cityInput);
+            await DisplayToilets(result, cityInput, dataToilets);
             cityInput = string.Empty;
         }
     }

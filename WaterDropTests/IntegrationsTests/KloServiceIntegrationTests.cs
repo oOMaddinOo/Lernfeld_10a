@@ -26,24 +26,24 @@ namespace WaterDropTests.IntegrationsTests
 		public async Task FullCrudWorkflow_ShouldWorkEndToEnd()
 		{
 			// Arrange
-			var kloModel = CreateTestKloModel("Integration Test");
+			var kloModel = CreateTestKloModel("Integration Test", 123456);
 
 			// Act & Assert - Add
 			await _service.AddKloCommentToData(kloModel);
 			var allData = await _service.GetAllKloData();
 			Assert.Single(allData);
 			Assert.Equal("Integration Test", allData[0].Comment);
+			Assert.Equal(123456, allData[0].ElementId);
 
 			// Act & Assert - Get One
-			var singleKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			var singleKlo = await _service.GetOneKloData(kloModel.Id);
 			Assert.NotNull(singleKlo);
 			Assert.Equal("Integration Test", singleKlo.Comment);
-			Assert.Equal(2, singleKlo.Elements.Count);
 
 			// Act & Assert - Update
 			singleKlo.Comment = "Updated Integration Test";
 			await _service.UpdateCommentData(singleKlo);
-			var updatedKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			var updatedKlo = await _service.GetOneKloData(kloModel.Id);
 			Assert.Equal("Updated Integration Test", updatedKlo.Comment);
 
 			// Act & Assert - Delete
@@ -53,12 +53,12 @@ namespace WaterDropTests.IntegrationsTests
 		}
 
 		[Fact]
-		public async Task AddMultipleKloModels_WithRelations_ShouldPersistCorrectly()
+		public async Task AddMultipleKloModels_ShouldPersistCorrectly()
 		{
 			// Arrange
-			var klo1 = CreateTestKloModel("Hamburg Hauptbahnhof");
-			var klo2 = CreateTestKloModel("Berlin Alexanderplatz");
-			var klo3 = CreateTestKloModel("München Marienplatz");
+			var klo1 = CreateTestKloModel("Hamburg Hauptbahnhof", 111111);
+			var klo2 = CreateTestKloModel("Berlin Alexanderplatz", 222222);
+			var klo3 = CreateTestKloModel("München Marienplatz", 333333);
 
 			// Act
 			await _service.AddKloCommentToData(klo1);
@@ -69,55 +69,51 @@ namespace WaterDropTests.IntegrationsTests
 			var allKlos = await _service.GetAllKloData();
 			Assert.Equal(3, allKlos.Count);
 
-			// Verify all Elements are loaded
+			// Verify all have correct data
 			Assert.All(allKlos, klo =>
 			{
-				Assert.NotNull(klo.Elements);
-				Assert.Equal(2, klo.Elements.Count);
-				Assert.NotNull(klo.Osm3s);
+				Assert.NotNull(klo.Comment);
+				Assert.NotEqual(0, klo.ElementId);
 			});
 		}
 
 		[Fact]
-		public async Task UpdateKloModel_WithChangedElements_ShouldPersistChanges()
+		public async Task UpdateKloModel_WithChangedProperties_ShouldPersistChanges()
 		{
 			// Arrange
-			var kloModel = CreateTestKloModel("Original");
+			var kloModel = CreateTestKloModel("Original", 444444);
 			await _service.AddKloCommentToData(kloModel);
 
 			// Act - Load and modify
-			var loadedKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			var loadedKlo = await _service.GetOneKloData(kloModel.Id);
 			loadedKlo.Comment = "Modified Comment";
 			loadedKlo.PictureUrl = "https://example.com/new-picture.jpg";
-
-			// Ändere das Dictionary und weise es neu zu, um den Setter zu triggern
-			var tags = loadedKlo.Elements[0].Tags;
-			tags["wheelchair"] = "limited";
-			loadedKlo.Elements[0].Tags = tags; // Neu zuweisen!
 
 			await _service.UpdateCommentData(loadedKlo);
 
 			// Assert
-			var updatedKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			var updatedKlo = await _service.GetOneKloData(kloModel.Id);
 			Assert.Equal("Modified Comment", updatedKlo.Comment);
 			Assert.Equal("https://example.com/new-picture.jpg", updatedKlo.PictureUrl);
-			Assert.Equal("limited", updatedKlo.Elements[0].Tags["wheelchair"]);
+			Assert.Equal(444444, updatedKlo.ElementId);
 		}
 
 		[Fact]
-		public async Task DeleteKloModel_ShouldAlsoCascadeDeleteRelatedEntities()
+		public async Task DeleteKloModel_ShouldRemoveFromDatabase()
 		{
 			// Arrange
-			var kloModel = CreateTestKloModel("To Delete");
+			var kloModel = CreateTestKloModel("To Delete", 555555);
 			await _service.AddKloCommentToData(kloModel);
-			var elementIds = kloModel.Elements.Select(e => e.Id).ToList();
-			var osm3sId = kloModel.Osm3s.Id;
+
+			// Verify it exists
+			var existingKlo = await _service.GetOneKloData(kloModel.Id);
+			Assert.NotNull(existingKlo);
 
 			// Act
 			await _service.DeleteKloDataComment(kloModel.Id);
 
-			// Assert - Check if related entities are also deleted (depends on cascade settings)
-			var klo = await _service.GetOneKloData(kloModel.Id.Value);
+			// Assert
+			var klo = await _service.GetOneKloData(kloModel.Id);
 			Assert.Null(klo);
 		}
 
@@ -126,7 +122,7 @@ namespace WaterDropTests.IntegrationsTests
 		{
 			// Arrange
 			var klos = Enumerable.Range(1, 10)
-				.Select(i => CreateTestKloModel($"Klo {i}"))
+				.Select(i => CreateTestKloModel($"Klo {i}", 1000000 + i))
 				.ToList();
 
 			// Act - Simulate concurrent adds
@@ -136,6 +132,7 @@ namespace WaterDropTests.IntegrationsTests
 			// Assert
 			var allKlos = await _service.GetAllKloData();
 			Assert.Equal(10, allKlos.Count);
+			Assert.Equal(10, allKlos.Select(k => k.ElementId).Distinct().Count());
 		}
 
 		[Fact]
@@ -144,7 +141,7 @@ namespace WaterDropTests.IntegrationsTests
 			// Arrange - Add 50 records
 			for (int i = 0; i < 50; i++)
 			{
-				var klo = CreateTestKloModel($"Bulk Test {i}");
+				var klo = CreateTestKloModel($"Bulk Test {i}", 2000000 + i);
 				await _service.AddKloCommentToData(klo);
 			}
 
@@ -153,7 +150,11 @@ namespace WaterDropTests.IntegrationsTests
 
 			// Assert
 			Assert.Equal(50, allKlos.Count);
-			Assert.All(allKlos, klo => Assert.NotNull(klo.Elements));
+			Assert.All(allKlos, klo =>
+			{
+				Assert.NotNull(klo.Comment);
+				Assert.NotEqual(0, klo.ElementId);
+			});
 		}
 
 		[Fact]
@@ -172,115 +173,128 @@ namespace WaterDropTests.IntegrationsTests
 		public async Task GetOneKloData_AfterMultipleUpdates_ShouldReturnLatestVersion()
 		{
 			// Arrange
-			var kloModel = CreateTestKloModel("Version 1");
+			var kloModel = CreateTestKloModel("Version 1", 666666);
 			await _service.AddKloCommentToData(kloModel);
 
 			// Act - Multiple updates
 			for (int i = 2; i <= 5; i++)
 			{
-				var klo = await _service.GetOneKloData(kloModel.Id.Value);
+				var klo = await _service.GetOneKloData(kloModel.Id);
 				klo.Comment = $"Version {i}";
 				await _service.UpdateCommentData(klo);
 			}
 
 			// Assert
-			var finalKlo = await _service.GetOneKloData(kloModel.Id.Value);
+			var finalKlo = await _service.GetOneKloData(kloModel.Id);
 			Assert.Equal("Version 5", finalKlo.Comment);
 		}
 
 		[Fact]
-		public async Task AddKloModel_WithComplexTags_ShouldPreserveAllData()
+		public async Task GetKloByElementId_ShouldReturnCorrectKloModel()
 		{
 			// Arrange
-			var kloModel = CreateTestKloModel("Complex Tags Test");
-			kloModel.Elements[0].Tags = new Dictionary<string, string>
+			var elementId = 9106108128L;
+			var kloModel = CreateTestKloModel("Test by ElementId", elementId);
+			await _service.AddKloCommentToData(kloModel);
+
+			// Act
+			var result = await _service.GetKloByElementId(elementId);
+
+			// Assert
+			Assert.NotNull(result);
+			Assert.Equal(elementId, result.ElementId);
+			Assert.Equal("Test by ElementId", result.Comment);
+		}
+
+		[Fact]
+		public async Task GetKloByElementId_WithMultipleKlos_ShouldReturnCorrectOne()
+		{
+			// Arrange
+			var klo1 = CreateTestKloModel("Klo 1", 777777);
+			var klo2 = CreateTestKloModel("Klo 2", 888888);
+			var klo3 = CreateTestKloModel("Klo 3", 999999);
+			
+			await _service.AddKloCommentToData(klo1);
+			await _service.AddKloCommentToData(klo2);
+			await _service.AddKloCommentToData(klo3);
+
+			// Act
+			var result = await _service.GetKloByElementId(888888);
+
+			// Assert
+			Assert.NotNull(result);
+			Assert.Equal(888888, result.ElementId);
+			Assert.Equal("Klo 2", result.Comment);
+		}
+
+		[Fact]
+		public async Task UpdateKloModel_ShouldNotChangeElementId()
+		{
+			// Arrange
+			var originalElementId = 123123123L;
+			var kloModel = CreateTestKloModel("Original", originalElementId);
+			await _service.AddKloCommentToData(kloModel);
+
+			// Act
+			var loadedKlo = await _service.GetOneKloData(kloModel.Id);
+			loadedKlo.Comment = "Updated";
+			loadedKlo.PictureUrl = "https://example.com/updated.jpg";
+			await _service.UpdateCommentData(loadedKlo);
+
+			// Assert
+			var updatedKlo = await _service.GetOneKloData(kloModel.Id);
+			Assert.Equal(originalElementId, updatedKlo.ElementId);
+			Assert.Equal("Updated", updatedKlo.Comment);
+		}
+
+		[Fact]
+		public async Task AddKloModel_WithSameElementId_ShouldAllowDuplicates()
+		{
+			// Arrange
+			var elementId = 456456456L;
+			var klo1 = CreateTestKloModel("Comment 1", elementId);
+			var klo2 = CreateTestKloModel("Comment 2", elementId);
+
+			// Act
+			await _service.AddKloCommentToData(klo1);
+			await _service.AddKloCommentToData(klo2);
+
+			// Assert
+			var allKlos = await _service.GetAllKloData();
+			Assert.Equal(2, allKlos.Count);
+			Assert.All(allKlos, klo => Assert.Equal(elementId, klo.ElementId));
+		}
+
+		[Fact]
+		public async Task AddKloModel_WithNullPictureUrl_ShouldPersist()
+		{
+			// Arrange
+			var kloModel = new DatabaseKloModel
 			{
-				{ "amenity", "toilets" },
-				{ "access", "public" },
-				{ "fee", "no" },
-				{ "wheelchair", "yes" },
-				{ "name", "Öffentliche Toilette München" },
-				{ "opening_hours", "24/7" },
-				{ "operator", "Stadt München" },
-				{ "description", "Saubere öffentliche Toilette im Zentrum" }
+				Id = Guid.NewGuid(),
+				Comment = "No Picture",
+				PictureUrl = null,
+				ElementId = 789789789
 			};
 
 			// Act
 			await _service.AddKloCommentToData(kloModel);
 
 			// Assert
-			var savedKlo = await _service.GetOneKloData(kloModel.Id.Value);
-			Assert.Equal(8, savedKlo.Elements[0].Tags.Count);
-			Assert.Equal("Öffentliche Toilette München", savedKlo.Elements[0].Tags["name"]);
+			var savedKlo = await _service.GetOneKloData(kloModel.Id);
+			Assert.NotNull(savedKlo);
+			Assert.Null(savedKlo.PictureUrl);
+			Assert.Equal("No Picture", savedKlo.Comment);
 		}
 
-		[Fact]
-		public async Task UpdateCommentData_WithNullOsm3s_ShouldHandleGracefully()
+		private DatabaseKloModel CreateTestKloModel(string comment, long elementId)
 		{
-			// Arrange
-			var kloModel = CreateTestKloModel("Test");
-			await _service.AddKloCommentToData(kloModel);
-
-			var loadedKlo = await _service.GetOneKloData(kloModel.Id.Value);
-			loadedKlo.Comment = "Updated";
-
-			// Act & Assert
-			await _service.UpdateCommentData(loadedKlo);
-			var updatedKlo = await _service.GetOneKloData(kloModel.Id.Value);
-			Assert.Equal("Updated", updatedKlo.Comment);
-		}
-
-		private KloModel CreateTestKloModel(string comment)
-		{
-			var kloId = Guid.NewGuid();
-			return new KloModel
+			return new DatabaseKloModel
 			{
-				Id = kloId,
-				Version = 0.6,
-				Generator = "Integration Test Generator",
+				Id = Guid.NewGuid(),
 				Comment = comment,
-				PictureUrl = "https://example.com/toilet.jpg",
-				Osm3s = new Osm3s
-				{
-					Id = Guid.NewGuid(),
-					TimestampOsmBase = DateTime.UtcNow,
-					TimestampAreasBase = DateTime.UtcNow,
-					Copyright = "© OpenStreetMap contributors"
-				},
-				Elements = new List<Element>
-				{
-					new Element
-					{
-						Id = Guid.NewGuid(),
-						KloModelId = kloId,
-						Type = "node",
-						ElementId = 123456789,
-						Lat = 53.5801097,
-						Lon = 9.8859876,
-						Tags = new Dictionary<string, string>
-						{
-							{ "amenity", "toilets" },
-							{ "access", "public" },
-							{ "fee", "no" },
-							{ "wheelchair", "yes" }
-						}
-					},
-					new Element
-					{
-						Id = Guid.NewGuid(),
-						KloModelId = kloId,
-						Type = "node",
-						ElementId = 987654321,
-						Lat = 53.5511,
-						Lon = 9.9937,
-						Tags = new Dictionary<string, string>
-						{
-							{ "amenity", "toilets" },
-							{ "access", "customers" },
-							{ "fee", "yes" }
-						}
-					}
-				}
+				PictureUrl = "https://waterdropstorage.blob.core.windows.net/picture/golden-toilet.jpg",
+				ElementId = elementId
 			};
 		}
 
@@ -289,6 +303,5 @@ namespace WaterDropTests.IntegrationsTests
 			_context.Database.EnsureDeleted();
 			_context.Dispose();
 		}
-
 	}
 }

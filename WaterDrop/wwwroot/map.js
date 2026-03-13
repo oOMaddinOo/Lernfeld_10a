@@ -12,7 +12,7 @@ window.initMap = function (lat, lon) {
     /* L.marker([lat, lon]).addTo(window.map);*/
 };
 
-window.addMarker = function (lat, lon, type, tags) {
+window.addMarker = function (elementId, lat, lon, type, tags, comment, pictureUrl) {
 
     if (!window.map) {
         console.error("Map not initialized!");
@@ -31,8 +31,26 @@ window.addMarker = function (lat, lon, type, tags) {
         tagsHtml = '<em>Keine Tags verfügbar</em>';
     }
 
+    // ElementId formatieren, falls vorhanden
+    let elementIdHtml = '';
+    if (elementId) {
+        elementIdHtml = `<strong>Id:</strong> ${elementId}<br>`;
+    }
+
+    // Kommentar formatieren, falls vorhanden
+    let commentHtml = '';
+    if (comment && comment.trim() !== '') {
+        commentHtml = `<strong>Kommentar:</strong><br><em>${comment}</em><br>`;
+    }
+
+    // Bild formatieren, falls vorhanden
+    let pictureHtml = '';
+    if (pictureUrl && pictureUrl.trim() !== '') {
+        pictureHtml = `<img src="${pictureUrl}" alt="Toilette" style="max-width: 200px; max-height: 150px; margin-top: 10px; border-radius: 5px; display: block;"><br>`;
+    }
+
     const marker = L.marker([lat, lon]).addTo(window.map)
-        .bindPopup(`<strong>Type:</strong> ${type}<br>${tagsHtml}`);
+        .bindPopup(`${elementIdHtml}<strong>Type:</strong> ${type}<br>${commentHtml}${pictureHtml}${tagsHtml}`);
 
     window.markers.push(marker);
 };

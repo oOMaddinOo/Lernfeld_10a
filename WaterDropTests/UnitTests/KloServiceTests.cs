@@ -25,24 +25,25 @@ namespace WaterDropTests.UnitTests
 		public async Task AddKloCommentToData_ShouldAddKloModelToDatabase()
 		{
 			// Arrange
-			var kloModel = CreateTestKloModel("Test Kommentar");
+			var kloModel = CreateTestKloModel("Test Kommentar", 123456);
 
 			// Act
 			await _service.AddKloCommentToData(kloModel);
 
 			// Assert
-			var result = await _context.KloModel.FindAsync(kloModel.Id);
+			var result = await _context.DatabaseKloModel.FindAsync(kloModel.Id);
 			Assert.NotNull(result);
 			Assert.Equal("Test Kommentar", result.Comment);
-			Assert.Single(_context.KloModel);
+			Assert.Equal(123456, result.ElementId);
+			Assert.Single(_context.DatabaseKloModel);
 		}
 
 		[Fact]
 		public async Task GetAllKloData_ShouldReturnAllKloModels()
 		{
 			// Arrange
-			var klo1 = CreateTestKloModel("Kommentar 1");
-			var klo2 = CreateTestKloModel("Kommentar 2");
+			var klo1 = CreateTestKloModel("Kommentar 1", 111111);
+			var klo2 = CreateTestKloModel("Kommentar 2", 222222);
 			await _service.AddKloCommentToData(klo1);
 			await _service.AddKloCommentToData(klo2);
 
@@ -54,23 +55,6 @@ namespace WaterDropTests.UnitTests
 			Assert.Equal(2, result.Count);
 			Assert.Contains(result, k => k.Comment == "Kommentar 1");
 			Assert.Contains(result, k => k.Comment == "Kommentar 2");
-		}
-
-		[Fact]
-		public async Task GetAllKloData_ShouldIncludeElementsAndOsm3s()
-		{
-			// Arrange
-			var kloModel = CreateTestKloModel("Test mit Relations");
-			await _service.AddKloCommentToData(kloModel);
-
-			// Act
-			var result = await _service.GetAllKloData();
-
-			// Assert
-			Assert.Single(result);
-			Assert.NotNull(result[0].Elements);
-			Assert.Equal(2, result[0].Elements.Count);
-			Assert.NotNull(result[0].Osm3s);
 		}
 
 		[Fact]
@@ -88,16 +72,16 @@ namespace WaterDropTests.UnitTests
 		public async Task DeleteKloDataComment_ShouldRemoveKloModel()
 		{
 			// Arrange
-			var kloModel = CreateTestKloModel("Zu löschen");
+			var kloModel = CreateTestKloModel("Zu löschen", 333333);
 			await _service.AddKloCommentToData(kloModel);
 
 			// Act
 			await _service.DeleteKloDataComment(kloModel.Id);
 
 			// Assert
-			var result = await _context.KloModel.FindAsync(kloModel.Id);
+			var result = await _context.DatabaseKloModel.FindAsync(kloModel.Id);
 			Assert.Null(result);
-			Assert.Empty(_context.KloModel);
+			Assert.Empty(_context.DatabaseKloModel);
 		}
 
 		[Fact]
@@ -118,24 +102,21 @@ namespace WaterDropTests.UnitTests
 		public async Task UpdateCommentData_ShouldUpdateExistingKloModel()
 		{
 			// Arrange
-			var kloModel = CreateTestKloModel("Original Kommentar");
+			var kloModel = CreateTestKloModel("Original Kommentar", 444444);
 			await _service.AddKloCommentToData(kloModel);
 
 			// Detach to simulate a fresh context
 			_context.Entry(kloModel).State = EntityState.Detached;
 
-			var updatedKlo = await _context.KloModel
-				.Include(k => k.Elements)
-				.Include(k => k.Osm3s)
+			var updatedKlo = await _context.DatabaseKloModel
 				.FirstAsync(k => k.Id == kloModel.Id);
 			updatedKlo.Comment = "Aktualisierter Kommentar";
 
 			// Act
 			await _service.UpdateCommentData(updatedKlo);
-			await _context.SaveChangesAsync();
 
 			// Assert
-			var result = await _context.KloModel.FindAsync(kloModel.Id);
+			var result = await _context.DatabaseKloModel.FindAsync(kloModel.Id);
 			Assert.NotNull(result);
 			Assert.Equal("Aktualisierter Kommentar", result.Comment);
 		}
@@ -144,35 +125,19 @@ namespace WaterDropTests.UnitTests
 		public async Task GetOneKloData_ShouldReturnSpecificKloModel()
 		{
 			// Arrange
-			var klo1 = CreateTestKloModel("Kommentar 1");
-			var klo2 = CreateTestKloModel("Kommentar 2");
+			var klo1 = CreateTestKloModel("Kommentar 1", 555555);
+			var klo2 = CreateTestKloModel("Kommentar 2", 666666);
 			await _service.AddKloCommentToData(klo1);
 			await _service.AddKloCommentToData(klo2);
 
 			// Act
-			var result = await _service.GetOneKloData(klo1.Id.Value);
+			var result = await _service.GetOneKloData(klo1.Id);
 
 			// Assert
 			Assert.NotNull(result);
 			Assert.Equal(klo1.Id, result.Id);
 			Assert.Equal("Kommentar 1", result.Comment);
-		}
-
-		[Fact]
-		public async Task GetOneKloData_ShouldIncludeElementsAndOsm3s()
-		{
-			// Arrange
-			var kloModel = CreateTestKloModel("Test");
-			await _service.AddKloCommentToData(kloModel);
-
-			// Act
-			var result = await _service.GetOneKloData(kloModel.Id.Value);
-
-			// Assert
-			Assert.NotNull(result);
-			Assert.NotNull(result.Elements);
-			Assert.Equal(2, result.Elements.Count);
-			Assert.NotNull(result.Osm3s);
+			Assert.Equal(555555, result.ElementId);
 		}
 
 		[Fact]
@@ -188,54 +153,44 @@ namespace WaterDropTests.UnitTests
 			Assert.Null(result);
 		}
 
-		private KloModel CreateTestKloModel(string comment)
+		[Fact]
+		public async Task GetKloByElementId_ShouldReturnCorrectKloModel()
 		{
-			var kloId = Guid.NewGuid();
-			return new KloModel
+			// Arrange
+			var elementId = 9106108128L;
+			var kloModel = CreateTestKloModel("Test Kommentar", elementId);
+			await _service.AddKloCommentToData(kloModel);
+
+			// Act
+			var result = await _service.GetKloByElementId(elementId);
+
+			// Assert
+			Assert.NotNull(result);
+			Assert.Equal(elementId, result.ElementId);
+			Assert.Equal("Test Kommentar", result.Comment);
+		}
+
+		[Fact]
+		public async Task GetKloByElementId_WithNonExistentElementId_ShouldReturnNull()
+		{
+			// Arrange
+			var nonExistentElementId = 999999999L;
+
+			// Act
+			var result = await _service.GetKloByElementId(nonExistentElementId);
+
+			// Assert
+			Assert.Null(result);
+		}
+
+		private DatabaseKloModel CreateTestKloModel(string comment, long elementId)
+		{
+			return new DatabaseKloModel
 			{
-				Id = kloId,
-				Version = 0.6,
-				Generator = "Test Generator",
+				Id = Guid.NewGuid(),
 				Comment = comment,
-				PictureUrl = "https://example.com/toilet.jpg",
-				Osm3s = new Osm3s
-				{
-					Id = Guid.NewGuid(),
-					TimestampOsmBase = DateTime.UtcNow,
-					TimestampAreasBase = DateTime.UtcNow,
-					Copyright = "© OpenStreetMap contributors"
-				},
-				Elements = new List<Element>
-				{
-					new Element
-					{
-						Id = Guid.NewGuid(),
-						KloModelId = kloId,
-						Type = "node",
-						ElementId = 123456789,
-						Lat = 53.5801097,
-						Lon = 9.8859876,
-						Tags = new Dictionary<string, string>
-						{
-							{ "amenity", "toilets" },
-							{ "access", "public" }
-						}
-					},
-					new Element
-					{
-						Id = Guid.NewGuid(),
-						KloModelId = kloId,
-						Type = "node",
-						ElementId = 987654321,
-						Lat = 53.5511,
-						Lon = 9.9937,
-						Tags = new Dictionary<string, string>
-						{
-							{ "amenity", "toilets" },
-							{ "fee", "yes" }
-						}
-					}
-				}
+				PictureUrl = "https://example.com/new-picture.jpg",
+				ElementId = elementId
 			};
 		}
 
