@@ -25,10 +25,6 @@ namespace WaterDrop.Components.Models
 
 		[JsonProperty("elements")]
 		public List<Element> Elements { get; set; }
-
-		public string? Comment { get; set; }
-
-		public string? PictureUrl { get; set; }
 	}
 
 	public class Osm3s
