@@ -4,6 +4,7 @@ namespace WaterDrop.Components.Models
 {
 	public class KloModel
 	{
+		
 		[JsonProperty("version")]
 		public double Version { get; set; }
 
