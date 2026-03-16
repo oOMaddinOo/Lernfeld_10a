@@ -8,6 +8,7 @@ namespace WaterDrop.Components.Models
 
 	public class KloModel
 	{
+		
 		[Key]
 		public Guid? Id { get; set; }
 
