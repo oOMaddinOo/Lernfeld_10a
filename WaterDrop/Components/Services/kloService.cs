@@ -108,5 +108,12 @@ namespace WaterDrop.Components.Services
 		{
 			return await _context.DatabaseKloModel.FirstOrDefaultAsync(k => k.Id == kloId);
 		}
+
+		public async Task<List<DatabaseKloModel>> GetKlosByElementIds(long[] elementIds)
+		{
+			return await _context.DatabaseKloModel
+				.Where(e => elementIds.Contains(e.ElementId))
+				.ToListAsync();
+		}
 	}
 }
