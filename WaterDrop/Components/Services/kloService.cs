@@ -1,4 +1,6 @@
-﻿using Newtonsoft.Json;
+﻿using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json;
+using WaterDrop.Components.Data;
 using WaterDrop.Components.Models;
 
 namespace WaterDrop.Components.Services
@@ -6,6 +8,12 @@ namespace WaterDrop.Components.Services
 	public class kloService
 	{
 		private static readonly HttpClient _httpClient = new HttpClient();
+		private ApplicationDbContext _context;
+
+		public kloService(ApplicationDbContext context)
+		{
+			_context = context;
+		}
 
 		public async Task<KloModel> GetToilets(ToiletQueryBuilder queryBuilder)
 		{
@@ -51,6 +59,61 @@ namespace WaterDrop.Components.Services
 				Console.WriteLine($"Error fetching toilets: {ex.Message}");
 				return new KloModel { Elements = new List<Element>() };
 			}
+		}
+
+
+		public async Task AddKloCommentToData(DatabaseKloModel klomodel)
+		{
+			_context.DatabaseKloModel.Add(klomodel);
+			await _context.SaveChangesAsync();
+		}
+
+		public async Task<List<DatabaseKloModel>> GetAllKloData()
+		{
+			return await _context.DatabaseKloModel.ToListAsync();
+		}
+
+		public async Task<DatabaseKloModel> GetKloByElementId(long elementId)
+		{
+			return await _context.DatabaseKloModel
+		.Where(e => e.ElementId == elementId)
+		.FirstOrDefaultAsync();
+		}
+
+		public async Task DeleteKloDataComment(Guid? kloId)
+		{
+			if (kloId == null)
+			{
+				throw new ArgumentNullException(nameof(kloId));
+			}
+
+			var klo = await _context.DatabaseKloModel.FindAsync(kloId);
+
+			if (klo == null)
+			{
+				return;
+			}
+
+			_context.DatabaseKloModel.Remove(klo);
+			await _context.SaveChangesAsync();
+		}
+
+		public async Task UpdateCommentData(DatabaseKloModel kloModel)
+		{
+			_context.DatabaseKloModel.Update(kloModel);
+			await _context.SaveChangesAsync();
+		}
+
+		public async Task<DatabaseKloModel?> GetOneKloData(Guid kloId)
+		{
+			return await _context.DatabaseKloModel.FirstOrDefaultAsync(k => k.Id == kloId);
+		}
+
+		public async Task<List<DatabaseKloModel>> GetKlosByElementIds(long[] elementIds)
+		{
+			return await _context.DatabaseKloModel
+				.Where(e => elementIds.Contains(e.ElementId))
+				.ToListAsync();
 		}
 	}
 }

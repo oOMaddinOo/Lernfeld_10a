@@ -1,10 +1,17 @@
 ﻿using Newtonsoft.Json;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace WaterDrop.Components.Models
 {
+
+
 	public class KloModel
 	{
 		
+		[Key]
+		public Guid? Id { get; set; }
+
 		[JsonProperty("version")]
 		public double Version { get; set; }
 
@@ -14,12 +21,18 @@ namespace WaterDrop.Components.Models
 		[JsonProperty("osm3s")]
 		public Osm3s Osm3s { get; set; }
 
+		[ForeignKey("Osm3s")]
+		public Guid? Osm3sId { get; set; }
+
 		[JsonProperty("elements")]
 		public List<Element> Elements { get; set; }
 	}
 
 	public class Osm3s
 	{
+		[Key]
+		public Guid Id { get; set; }
+
 		[JsonProperty("timestamp_osm_base")]
 		public DateTime TimestampOsmBase { get; set; }
 
@@ -32,11 +45,14 @@ namespace WaterDrop.Components.Models
 
 	public class Element
 	{
+		[Key]
+		public Guid Id { get; set; }
+
 		[JsonProperty("type")]
 		public string Type { get; set; }
 
 		[JsonProperty("id")]
-		public long Id { get; set; }
+		public long ElementId { get; set; }
 
 		[JsonProperty("lat")]
 		public double? Lat { get; set; }
@@ -44,8 +60,23 @@ namespace WaterDrop.Components.Models
 		[JsonProperty("lon")]
 		public double? Lon { get; set; }
 
+		[JsonProperty("center")]
+		public Center? Center { get; set; }
+
 		// Dynamische Tags
 		[JsonProperty("tags")]
 		public Dictionary<string, string> Tags { get; set; }
+
+		[ForeignKey("KloModel")]
+		public Guid? KloModelId { get; set; }
+	}
+
+	public class Center
+	{
+		[JsonProperty("lat")]
+		public double Lat { get; set; }
+
+		[JsonProperty("lon")]
+		public double Lon { get; set; }
 	}
 }

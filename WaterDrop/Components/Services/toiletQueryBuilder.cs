@@ -3,7 +3,7 @@
 	public class ToiletQueryBuilder
 	{
 		private string _city = "Hamburg";
-		private int _timeout = 30;
+		private int _timeout = 25;
 		private string _amenityType = "toilets";
 		private bool _includeFee = false;
 		private string _accessType = null;
@@ -55,7 +55,20 @@
 				query += @"[""fee""]";
 			}
 
-			query += @"(area.searchArea);
+			query += $@"(area.searchArea);
+                  way[""amenity""=""{_amenityType}""]";
+
+		if (_accessType != null)
+		{
+			query += $@"[""access""=""{_accessType}""]";
+		}
+
+		if (_includeFee)
+		{
+			query += @"[""fee""]";
+		}
+
+		query += @"(area.searchArea);
                   way[""amenity""=""toilets""](area.searchArea);
                   relation[""amenity""=""toilets""](area.searchArea);
                 );

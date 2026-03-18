@@ -1,4 +1,7 @@
+using Microsoft.EntityFrameworkCore;
 using WaterDrop.Components;
+using WaterDrop.Components.Data;
+using WaterDrop.Components.Services;
 
 namespace WaterDrop
 {
@@ -12,7 +15,12 @@ namespace WaterDrop
             builder.Services.AddRazorComponents()
                 .AddInteractiveServerComponents();
 
-            var app = builder.Build();
+            builder.Services.AddDbContext<ApplicationDbContext>(options => 
+            options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+            builder.Services.AddScoped<kloService>();
+
+			var app = builder.Build();
 
             // Configure the HTTP request pipeline.
             if (!app.Environment.IsDevelopment())
