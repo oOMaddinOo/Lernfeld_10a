@@ -55,8 +55,20 @@
 				query += @"[""fee""]";
 			}
 
-			query += @"(area.searchArea);
-                  way[""amenity""=""toilets""](area.searchArea);
+			query += $@"(area.searchArea);
+                  way[""amenity""=""{_amenityType}""]";
+
+		if (_accessType != null)
+		{
+			query += $@"[""access""=""{_accessType}""]";
+		}
+
+		if (_includeFee)
+		{
+			query += @"[""fee""]";
+		}
+
+		query += @"(area.searchArea);
                   relation[""amenity""=""toilets""](area.searchArea);
                 );
                 out center;";

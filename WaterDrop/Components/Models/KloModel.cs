@@ -59,11 +59,23 @@ namespace WaterDrop.Components.Models
 		[JsonProperty("lon")]
 		public double? Lon { get; set; }
 
+		[JsonProperty("center")]
+		public Center? Center { get; set; }
+
 		// Dynamische Tags
 		[JsonProperty("tags")]
 		public Dictionary<string, string> Tags { get; set; }
 
 		[ForeignKey("KloModel")]
 		public Guid? KloModelId { get; set; }
+	}
+
+	public class Center
+	{
+		[JsonProperty("lat")]
+		public double Lat { get; set; }
+
+		[JsonProperty("lon")]
+		public double Lon { get; set; }
 	}
 }

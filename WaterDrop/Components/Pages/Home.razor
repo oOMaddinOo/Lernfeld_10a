@@ -4,12 +4,12 @@
 @implements IAsyncDisposable
 @rendermode InteractiveServer
 
-<PageTitle>WaterDrop</PageTitle>
+<Title>WaterDrop</Title>
 
-<!-- Full viewport map -->
+
 <div id="map"></div>
 
-<!-- ===== LEFT PANEL (Desktop) ===== -->
+
 <aside class="wd-panel">
     <div class="wd-header">
         <div class="wd-app-name">WaterDrop</div>
@@ -62,7 +62,6 @@
     <button class="wd-search-btn" @onclick="SearchAllActive">Search this area</button>
 </aside>
 
-<!-- ===== MOBILE TOP BAR ===== -->
 <div class="wd-mobile-topbar">
     <button class="wd-icon-btn" @onclick="ToggleBottomSheet">&#9776;</button>
     <input id="citySearchInputMobile"
@@ -75,7 +74,6 @@
     <button class="wd-icon-btn" @onclick="LocateUser">&#8982;</button>
 </div>
 
-<!-- ===== MOBILE BOTTOM SHEET ===== -->
 <div class="wd-bottom-sheet @(bottomSheetVisible ? "open" : "")">
     <div class="wd-drag-handle"></div>
     <div class="wd-sheet-title">Find Restrooms &amp; Water in @(string.IsNullOrEmpty(cityInput) ? "your area" : cityInput)</div>
@@ -115,7 +113,6 @@
     </div>
 </div>
 
-<!-- ===== FLOATING ELEMENTS ===== -->
 <button class="wd-locate-fab" @onclick="LocateUser" title="My location">&#8982;</button>
 
 @if (TotalCount > 0)
@@ -123,73 +120,30 @@
     <div class="wd-total-badge">@TotalCount results</div>
 }
 
-
-@* ===== COMMENTED OUT OLD UI =====
-<h1>Meine Karte</h1>
-
-<div class="mt-3">
-    <div class="row">
-        <div class="col-md-6">
-            <div class="input-group mb-3">
-                <input width="400" type="text"
-                       class="form-control"
-                       @bind="cityInput"
-                       placeholder="Enter city name (e.g., Berlin, München)"
-                       @onkeypress="HandleKeyPress" />
-                <button class="btn btn-success" @onclick="SearchCity">
-                    <i class="bi bi-search"></i> Such in der Stadt
-                </button>
-                <button @onclick="AddToCommentToDatabase">Ein Eintrag Erstellen</button>
-                <button @onclick="UpdateComment"> Klo Aktualisieren</button>
-                <button @onclick="LoadAllToilets">Alle Toiletten Laden</button>
-                <button @onclick="DeleteComment"> Klo Löschen</button>
-                <button @onclick="loadOneKlo">Ein Klo Laden</button>
-            </div>
+@if (reviewPanelVisible)
+{
+    <div class="wd-review-panel open">
+        <div class="wd-review-header">
+            <div class="wd-review-title">@selectedFacilityName</div>
+            <button class="wd-review-close" @onclick="CloseReviewPanel">&times;</button>
+        </div>
+        <div class="wd-review-body">
+            <label class="wd-review-label">Your Review</label>
+            <textarea class="wd-review-textarea"
+                      @bind="reviewText"
+                      placeholder="Write your review here..."></textarea>
+            <button class="wd-review-save-btn" @onclick="SaveReview">Send Review</button>
+            @if (!string.IsNullOrEmpty(reviewSaveMessage))
+            {
+                <div class="wd-review-feedback">@reviewSaveMessage</div>
+            }
         </div>
     </div>
-
-    <div class="btn-group" role="group">
-        <button class="btn btn-warning" @onclick="ClearMap">Clear Map</button>
-    </div>
-</div>
-
-<div>
-   <table>
-       <thead>
-        <th>Id</th>
-        <th>Kommentar</th>
-        <th>ElementId</th>
-       </thead>
-       <tbody>
-           @if(allKloData.Any())
-            {
-                @foreach(var klo in allKloData)
-                {
-                    <tr>
-                        <td>@klo.Id</td>
-                        <td>@klo.Comment</td>
-                        <td>@klo.ElementId</td>
-                        <td>@klo.PictureUrl</td>
-                    </tr>
-                }
-            }
-        </tbody>
-   </table>
-</div>
-
-@if (!string.IsNullOrEmpty(errorMessage))
-{
-    <div class="alert alert-danger mt-3" style="max-width:400px;">@errorMessage</div>
 }
 
-@if (!string.IsNullOrEmpty(successMessage))
-{
-    <div class="alert alert-success mt-3" style="max-width:300px;">@successMessage</div>
-}
-*@
 
 @code {
-    // ===== NEW CODE =====
+   
 
     private record CategoryDef(string Key, string Label, string Color);
 
@@ -276,7 +230,6 @@
 
         cityInput = char.ToUpper(cityInput[0]) + cityInput.Substring(1).ToLower();
 
-        // Clear all category layers (stale data from previous city)
         foreach (var cat in categories.Select(c => c.Key))
             await JS.InvokeVoidAsync("clearCategoryLayer", cat);
 
@@ -291,7 +244,39 @@
 
         try
         {
-            var result = await JS.InvokeAsync<Dictionary<string, int>>("fetchAllCategories", cityInput, activeCats);
+            var elementDtos = new List<object>();
+
+            if (activeCats.Any(c => c is "restrooms" or "accessible" or "changing_table"))
+            {
+                var toiletBuilder = new ToiletQueryBuilder()
+                    .SetCity(cityInput)
+                    .SetAmenityType("toilets");
+                var toiletResult = await kloService.GetToilets(toiletBuilder);
+                foreach (var e in toiletResult.Elements)
+                {
+                    var lat = e.Lat ?? e.Center?.Lat;
+                    var lon = e.Lon ?? e.Center?.Lon;
+                    if (lat.HasValue && lon.HasValue)
+                        elementDtos.Add(new { id = e.ElementId.ToString(), lat = lat.Value, lon = lon.Value, tags = e.Tags ?? new Dictionary<string, string>() });
+                }
+            }
+
+            if (activeCats.Contains("drinking_water"))
+            {
+                var waterBuilder = new ToiletQueryBuilder()
+                    .SetCity(cityInput)
+                    .SetAmenityType("drinking_water");
+                var waterResult = await kloService.GetToilets(waterBuilder);
+                foreach (var e in waterResult.Elements)
+                {
+                    var lat = e.Lat ?? e.Center?.Lat;
+                    var lon = e.Lon ?? e.Center?.Lon;
+                    if (lat.HasValue && lon.HasValue)
+                        elementDtos.Add(new { id = e.ElementId.ToString(), lat = lat.Value, lon = lon.Value, tags = e.Tags ?? new Dictionary<string, string>() });
+                }
+            }
+
+            var result = await JS.InvokeAsync<Dictionary<string, int>>("addCategoryElements", elementDtos, activeCats);
             foreach (var cat in activeCats)
             {
                 counts[cat] = result.TryGetValue(cat, out var c) ? c : 0;
@@ -319,8 +304,24 @@
 
         try
         {
-            var result = await JS.InvokeAsync<Dictionary<string, int>>("fetchAllCategories", cityInput, new[] { category });
-            counts[category] = result.TryGetValue(category, out var c) ? c : 0;
+            var amenityType = category == "drinking_water" ? "drinking_water" : "toilets";
+            var queryBuilder = new ToiletQueryBuilder()
+                .SetCity(cityInput)
+                .SetTimeout(25)
+                .SetAmenityType(amenityType);
+            var fetchResult = await kloService.GetToilets(queryBuilder);
+
+            var elementDtos = new List<object>();
+            foreach (var e in fetchResult.Elements)
+            {
+                var lat = e.Lat ?? e.Center?.Lat;
+                var lon = e.Lon ?? e.Center?.Lon;
+                if (lat.HasValue && lon.HasValue)
+                    elementDtos.Add(new { id = e.ElementId.ToString(), lat = lat.Value, lon = lon.Value, tags = e.Tags ?? new Dictionary<string, string>() });
+            }
+
+            var countResult = await JS.InvokeAsync<Dictionary<string, int>>("addCategoryElements", elementDtos, new[] { category });
+            counts[category] = countResult.TryGetValue(category, out var c) ? c : 0;
         }
         catch (Exception ex)
         {
@@ -332,6 +333,83 @@
             loadingStates[category] = false;
             StateHasChanged();
         }
+    }
+
+    private bool reviewPanelVisible = false;
+    private long selectedElementId = 0;
+    private string selectedFacilityName = string.Empty;
+    private string reviewText = string.Empty;
+    private string reviewSaveMessage = string.Empty;
+
+    [JSInvokable]
+    public Task OnMarkerSelected(string elementIdStr, string facilityName)
+    {
+        selectedElementId = long.Parse(elementIdStr);
+        selectedFacilityName = facilityName;
+        reviewText = string.Empty;
+        reviewSaveMessage = string.Empty;
+        reviewPanelVisible = true;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    public record ReviewInfo(string? Comment, string? PictureUrl);
+
+    [JSInvokable]
+    public async Task<Dictionary<string, ReviewInfo>> GetReviewsForElements(string[] elementIdStrs)
+    {
+        var elementIds = elementIdStrs
+            .Select(s => long.TryParse(s, out var id) ? id : 0L)
+            .Where(id => id != 0)
+            .ToArray();
+
+        var records = await kloService.GetKlosByElementIds(elementIds);
+
+        return records
+            .Where(r => !string.IsNullOrEmpty(r.Comment) || !string.IsNullOrEmpty(r.PictureUrl))
+            .ToDictionary(r => r.ElementId.ToString(), r => new ReviewInfo(r.Comment, r.PictureUrl));
+    }
+
+    private async Task SaveReview()
+    {
+        if (selectedElementId == 0) return;
+
+        try
+        {
+            var existing = await kloService.GetKloByElementId(selectedElementId);
+            if (existing != null)
+            {
+                existing.Comment = reviewText;
+                await kloService.UpdateCommentData(existing);
+            }
+            else
+            {
+                await kloService.AddKloCommentToData(new DatabaseKloModel
+                {
+                    Id = Guid.NewGuid(),
+                    ElementId = selectedElementId,
+                    Comment = reviewText,
+                    PictureUrl = null
+                });
+            }
+
+            await JS.InvokeVoidAsync("updateMarkersWithReview", selectedElementId.ToString(), reviewText);
+            reviewSaveMessage = "Review sent successfully";
+        }
+        catch (Exception ex)
+        {
+            reviewSaveMessage = $"Error sending review: {ex.Message}";
+            Console.WriteLine($"SaveReview error: {ex}");
+        }
+
+        StateHasChanged();
+    }
+
+    private void CloseReviewPanel()
+    {
+        reviewPanelVisible = false;
+        reviewSaveMessage = string.Empty;
+        StateHasChanged();
     }
 
     [JSInvokable]
@@ -358,223 +436,6 @@
     }
 
 
-    // ===== COMMENTED OUT OLD CODE =====
-    /*
-    private string errorMessage = string.Empty;
-    private string successMessage = string.Empty;
-    private DatabaseKloModel kloData = new DatabaseKloModel();
-    private List<DatabaseKloModel> allKloData = new List<DatabaseKloModel>();
+   
 
-    async Task SearchCity()
-    {
-        if (string.IsNullOrWhiteSpace(cityInput))
-        {
-            errorMessage = "Geben sie den namen einer Stadt ein.";
-            successMessage = string.Empty;
-            return;
-        }
-
-        await ClearMap();
-
-        cityInput = char.ToUpper(cityInput[0]) + cityInput.Substring(1).ToLower();
-
-        var queryBuilder = new ToiletQueryBuilder()
-            .SetCity(cityInput);
-
-        var result = await kloService.GetToilets(queryBuilder);
-        var kloData = await kloService.GetAllKloData();
-        await DisplayToilets(result, cityInput, kloData);
-    }
-
-    async Task ClearMap()
-    {
-        try
-        {
-            await JS.InvokeVoidAsync("clearMarkers");
-            errorMessage = string.Empty;
-            successMessage = string.Empty;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error clearing map: {ex.Message}");
-        }
-    }
-
-    async Task HandleKeyPress(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter")
-        {
-            await SearchCity();
-        }
-    }
-
-    async Task DisplayToilets(KloModel result, string cityName, List<DatabaseKloModel> kloModels)
-    {
-        errorMessage = string.Empty;
-        successMessage = string.Empty;
-
-        if (result == null)
-        {
-            errorMessage = $"Fehler beim laden von Toiletten daten {cityName}. Probier es noch einmal.";
-            Console.WriteLine("Error: Result is null");
-            return;
-        }
-
-        if (result.Elements == null || result.Elements.Count == 0)
-        {
-            errorMessage = $"Keine Toiletten gefunden in {cityName}.";
-            Console.WriteLine("Warning: No elements found");
-            return;
-        }
-
-        try
-        {
-            int markerCount = 0;
-            foreach (var toilet in result.Elements)
-            {
-                string comment = "Kein Kommentar";
-                string picture = "Kein Bild";
-                var kloData = await kloService.GetKloByElementId(toilet.ElementId);
-
-                if (kloData != null && kloData.Comment != null)
-                {
-                    comment = kloData.Comment;
-                }
-
-                if (kloData != null && kloData.PictureUrl != null)
-                {
-                    picture = kloData.PictureUrl;
-                }
-
-                if (toilet.Lat != null && toilet.Lon != null)
-                {
-                    await JS.InvokeVoidAsync("addMarker", toilet.ElementId, toilet.Lat, toilet.Lon, toilet.Type, toilet.Tags ?? new Dictionary<string, string>(), comment, picture);
-                    markerCount++;
-                }
-            }
-
-            successMessage = $"{markerCount} Toiletten in {cityName}!";
-
-            if (result.Elements.Count > 0 && result.Elements[0].Lat != null && result.Elements[0].Lon != null)
-            {
-                await JS.InvokeVoidAsync("centerMap", result.Elements[0].Lat, result.Elements[0].Lon);
-            }
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Error displaying toilets: {ex.Message}";
-            Console.WriteLine($"Fehler: {ex.Message}");
-        }
-    }
-
-    public async Task LoadAllToilets()
-    {
-        try
-        {
-            allKloData.Clear();
-            List<DatabaseKloModel> allToilets = await kloService.GetAllKloData();
-            foreach (var klo in allToilets)
-            {
-                allKloData.Add(klo);
-                successMessage = "Alle Toiletten erfolgreich aus der Datenbank geladen";
-            }
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Fehler beim Laden aller Toiletten aus der Datenbank: {ex.Message}";
-        }
-    }
-
-    public async Task DeleteComment()
-    {
-        try
-        {
-            var toilets = await kloService.GetAllKloData();
-            foreach (var klo in toilets)
-            {
-                await kloService.DeleteKloDataComment(klo.Id);
-                successMessage = "Klo erfolgreich gelöscht!";
-                break;
-            }
-            await LoadAllToilets();
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Fehler beim Löschen der Kommentare: {ex.Message}";
-        }
-    }
-
-    public async Task loadOneKlo()
-    {
-        allKloData.Clear();
-        var toilets = await kloService.GetAllKloData();
-        foreach (var klo in toilets)
-        {
-            allKloData.Add(klo);
-            break;
-        }
-    }
-
-    public async Task UpdateComment()
-    {
-        try
-        {
-            var toilets = await kloService.GetAllKloData();
-            foreach (var klo in toilets)
-            {
-                klo.Comment = "Das geilste Klo das ich jemals hatte!!!";
-                await kloService.UpdateCommentData(klo);
-                break;
-            }
-
-            successMessage = "Kommentar erfolgreich aktualisiert!";
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Fehler beim Aktualisieren des Kommentars: {ex.Message}";
-        }
-    }
-
-    public async Task AddToCommentToDatabase()
-    {
-        string comment = "Ich habe diese Toilette benutzt und sie war sauber!";
-        kloData.Comment = comment;
-
-        kloData = new DatabaseKloModel
-        {
-            Id = Guid.NewGuid(),
-            Comment = comment,
-            PictureUrl = "https://waterdropstorage.blob.core.windows.net/picture/golden-toilet.jpg",
-            ElementId = 9106108128
-        };
-        try
-        {
-            await kloService.AddKloCommentToData(kloData);
-            successMessage = "Kommentar erfolgreich zur Datenbank hinzugefügt!";
-            await LoadAllToilets();
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Fehler beim Hinzufügen des Kommentars: {ex.Message}";
-        }
-    }
-
-    protected override async Task OnAfterRenderAsync_OLD(bool firstRender)
-    {
-        if (firstRender)
-        {
-            await JS.InvokeVoidAsync("initMap", 53.5801097, 9.8859876);
-            cityInput = "Hamburg";
-
-            var queryBuilder = new ToiletQueryBuilder()
-                .SetCity(cityInput);
-
-            var dataToilets = await kloService.GetAllKloData();
-
-            var result = await kloService.GetToilets(queryBuilder);
-            await DisplayToilets(result, cityInput, dataToilets);
-            cityInput = string.Empty;
-        }
-    }
-    */
 }

@@ -1,4 +1,3 @@
-// ===== NEW: Category-based map functionality =====
 
 window.map = null;
 
@@ -58,7 +57,7 @@ function buildOverpassQuery(category, city) {
 
 function buildCombinedOverpassQuery(city) {
     const escaped = city.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    return `[out:json][timeout:60];area[name="${escaped}"]->.searchArea;(node[amenity=toilets](area.searchArea);way[amenity=toilets](area.searchArea);node[amenity=drinking_water](area.searchArea);way[amenity=drinking_water](area.searchArea););out body;>;out skel qt;`;
+    return `[out:json][timeout:25];area[name="${escaped}"][boundary=administrative]->.searchArea;(node[amenity=toilets](area.searchArea);way[amenity=toilets](area.searchArea);node[amenity=drinking_water](area.searchArea);way[amenity=drinking_water](area.searchArea););out center;`;
 }
 
 function classifyElement(el) {
@@ -80,6 +79,8 @@ window.fetchAllCategories = async function (city, activeCategories) {
         return {};
     }
 
+    window.markersByElementId = {};
+
     for (const cat of activeCategories) {
         if (window.categoryLayers[cat]) {
             window.categoryLayers[cat].clearLayers();
@@ -96,7 +97,12 @@ window.fetchAllCategories = async function (city, activeCategories) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const data = await response.json();
-    const elements = (data.elements || []).filter(el => el.lat != null && el.lon != null);
+    const elements = (data.elements || [])
+        .map(el => {
+            if (el.lat == null && el.center) { el.lat = el.center.lat; el.lon = el.center.lon; }
+            return el;
+        })
+        .filter(el => el.lat != null && el.lon != null);
 
     const counts = {};
     for (const cat of activeCategories) counts[cat] = 0;
@@ -109,15 +115,40 @@ window.fetchAllCategories = async function (city, activeCategories) {
         const popup = buildPopupContent(el.tags || {});
         for (const cat of cats) {
             const icon = createTeardropIcon(window.categoryColors[cat]);
-            L.marker([el.lat, el.lon], { icon })
-                .bindPopup(popup)
-                .addTo(window.categoryLayers[cat]);
+            const marker = L.marker([el.lat, el.lon], { icon });
+            marker._basePopupContent = popup;
+            marker.bindPopup(popup).addTo(window.categoryLayers[cat]);
             counts[cat] = (counts[cat] || 0) + 1;
+
+            if (!window.markersByElementId[el.id]) window.markersByElementId[el.id] = [];
+            window.markersByElementId[el.id].push(marker);
+
+            marker.on('click', function () {
+                const name = (el.tags && el.tags.name) ? el.tags.name : ('ID: ' + el.id);
+                if (window.dotNetRef) {
+                    window.dotNetRef.invokeMethodAsync('OnMarkerSelected', String(el.id), name);
+                }
+            });
         }
 
         if (!centered) {
             window.map.setView([el.lat, el.lon], 13);
             centered = true;
+        }
+    }
+
+    const elementIds = Object.keys(window.markersByElementId);
+    if (elementIds.length > 0 && window.dotNetRef) {
+        try {
+            const reviews = await window.dotNetRef.invokeMethodAsync('GetReviewsForElements', elementIds);
+            for (const [idStr, info] of Object.entries(reviews)) {
+                const markers = window.markersByElementId[idStr] || [];
+                for (const m of markers) {
+                    m.setPopupContent(buildPopupWithReviewAndPicture(m._basePopupContent, info.comment, info.pictureUrl));
+                }
+            }
+        } catch (e) {
+            console.warn('Could not load reviews:', e);
         }
     }
 
@@ -146,6 +177,65 @@ function buildPopupContent(tags) {
     if (!html) html = '<span style="color:#999;font-size:12px;">No details available</span>';
     return `<div style="font-family:system-ui,-apple-system,sans-serif;min-width:120px;">${html}</div>`;
 }
+
+window.addCategoryElements = async function (elements, activeCategories) {
+    if (!window.map) {
+        console.error('Map not initialized!');
+        return {};
+    }
+
+    window.markersByElementId = {};
+
+    const counts = {};
+    for (const cat of activeCategories) counts[cat] = 0;
+
+    let centered = false;
+    for (const el of elements) {
+        const cats = classifyElement(el).filter(c => activeCategories.includes(c));
+        if (cats.length === 0) continue;
+
+        const popup = buildPopupContent(el.tags || {});
+        for (const cat of cats) {
+            const icon = createTeardropIcon(window.categoryColors[cat]);
+            const marker = L.marker([el.lat, el.lon], { icon });
+            marker._basePopupContent = popup;
+            marker.bindPopup(popup).addTo(window.categoryLayers[cat]);
+            counts[cat] = (counts[cat] || 0) + 1;
+
+            if (!window.markersByElementId[el.id]) window.markersByElementId[el.id] = [];
+            window.markersByElementId[el.id].push(marker);
+
+            marker.on('click', function () {
+                const name = (el.tags && el.tags.name) ? el.tags.name : ('ID: ' + el.id);
+                if (window.dotNetRef) {
+                    window.dotNetRef.invokeMethodAsync('OnMarkerSelected', String(el.id), name);
+                }
+            });
+        }
+
+        if (!centered) {
+            window.map.setView([el.lat, el.lon], 13);
+            centered = true;
+        }
+    }
+
+    const elementIds = Object.keys(window.markersByElementId);
+    if (elementIds.length > 0 && window.dotNetRef) {
+        try {
+            const reviews = await window.dotNetRef.invokeMethodAsync('GetReviewsForElements', elementIds);
+            for (const [idStr, info] of Object.entries(reviews)) {
+                const markers = window.markersByElementId[idStr] || [];
+                for (const m of markers) {
+                    m.setPopupContent(buildPopupWithReviewAndPicture(m._basePopupContent, info.comment, info.pictureUrl));
+                }
+            }
+        } catch (e) {
+            console.warn('Could not load reviews:', e);
+        }
+    }
+
+    return counts;
+};
 
 window.fetchCategory = async function (category, city) {
     if (!window.map) {
@@ -218,6 +308,7 @@ window.centerMap = function (lat, lon, zoom = 13) {
 };
 
 window.initMapWithGeolocate = function (dotNetRef) {
+    window.dotNetRef = dotNetRef;
     window.initMap(51.0, 10.0);
     window.map.setZoom(6);
 
@@ -261,56 +352,30 @@ window.locateUser = function () {
 };
 
 
-// ===== COMMENTED OUT OLD FUNCTIONS =====
-/*
-window.markers = [];
-
-window.addMarker = function (elementId, lat, lon, type, tags, comment, pictureUrl) {
-
-    if (!window.map) {
-        console.error("Map not initialized!");
-        return;
+function buildPopupWithReviewAndPicture(baseContent, reviewText, pictureUrl) {
+    const noDetailsSpan = '<span style="color:#999;font-size:12px;">No details available</span>';
+    let addition = '';
+    if (reviewText) {
+        addition += `<div style="font-size:12px;color:#444;"><strong>Review:</strong> ${reviewText}</div>`;
     }
-
-    let tagsHtml = '';
-    if (tags && typeof tags === 'object' && Object.keys(tags).length > 0) {
-        tagsHtml = '<strong>Tags:</strong><ul style="margin: 5px 0; padding-left: 20px;">';
-        for (const [key, value] of Object.entries(tags)) {
-            tagsHtml += `<li><strong>${key}:</strong> ${value}</li>`;
-        }
-        tagsHtml += '</ul>';
-    } else {
-        tagsHtml = '<em>Keine Tags verfügbar</em>';
+    if (pictureUrl) {
+        addition += `<img src="${pictureUrl}" alt="Toilet" style="max-width:200px;max-height:150px;margin-top:8px;border-radius:5px;display:block;">`;
     }
-
-    let elementIdHtml = '';
-    if (elementId) {
-        elementIdHtml = `<strong>Id:</strong> ${elementId}<br>`;
+    if (!addition) return baseContent;
+    if (baseContent.includes(noDetailsSpan)) {
+        return baseContent.replace(noDetailsSpan, addition);
     }
+    return baseContent + `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #eee;">${addition}</div>`;
+}
 
-    let commentHtml = '';
-    if (comment && comment.trim() !== '') {
-        commentHtml = `<strong>Kommentar:</strong><br><em>${comment}</em><br>`;
-    }
+function buildPopupWithReview(baseContent, reviewText) {
+    return buildPopupWithReviewAndPicture(baseContent, reviewText, null);
+}
 
-    let pictureHtml = '';
-    if (pictureUrl && pictureUrl.trim() !== '') {
-        pictureHtml = `<img src="${pictureUrl}" alt="Toilette" style="max-width: 200px; max-height: 150px; margin-top: 10px; border-radius: 5px; display: block;"><br>`;
-    }
-
-    const marker = L.marker([lat, lon]).addTo(window.map)
-        .bindPopup(`${elementIdHtml}<strong>Type:</strong> ${type}<br>${commentHtml}${pictureHtml}${tagsHtml}`);
-
-    window.markers.push(marker);
-};
-
-window.clearMarkers = function () {
-    if (window.markers && window.markers.length > 0) {
-        window.markers.forEach(marker => {
-            window.map.removeLayer(marker);
-        });
-        window.markers = [];
-        console.log("All markers cleared");
+window.updateMarkersWithReview = function (elementIdStr, reviewText) {
+    const markers = window.markersByElementId && window.markersByElementId[elementIdStr];
+    if (!markers) return;
+    for (const m of markers) {
+        m.setPopupContent(buildPopupWithReview(m._basePopupContent, reviewText));
     }
 };
-*/

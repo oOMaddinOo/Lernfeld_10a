@@ -391,3 +391,136 @@
         bottom: 80px;
     }
 }
+
+/* ===== Review Panel ===== */
+.wd-review-panel {
+    position: fixed;
+    top: 0;
+    right: -340px;
+    width: 320px;
+    height: 100vh;
+    background: rgba(253, 250, 242, 0.97);
+    border-left: 0.5px solid rgba(0, 0, 0, 0.08);
+    z-index: 1100;
+    display: flex;
+    flex-direction: column;
+    font-family: system-ui, -apple-system, sans-serif;
+    box-sizing: border-box;
+    transition: right 0.3s ease;
+}
+
+.wd-review-panel.open {
+    right: 0;
+}
+
+.wd-review-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 16px 12px;
+    border-bottom: 0.5px solid rgba(0, 0, 0, 0.08);
+}
+
+.wd-review-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: #1a1a1a;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 240px;
+}
+
+.wd-review-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: #888;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.wd-review-close:hover {
+    color: #333;
+}
+
+.wd-review-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px 16px;
+    flex: 1;
+}
+
+.wd-review-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.wd-review-textarea {
+    width: 100%;
+    min-height: 120px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: #1a1a1a;
+    background: #fff;
+    resize: vertical;
+    box-sizing: border-box;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.wd-review-textarea:focus {
+    border-color: #3461C1;
+}
+
+.wd-review-save-btn {
+    background: #3461C1;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 0;
+    font-size: 13px;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    width: 100%;
+    transition: opacity 0.15s;
+}
+
+.wd-review-save-btn:hover {
+    opacity: 0.88;
+}
+
+.wd-review-feedback {
+    font-size: 12px;
+    color: #5BA85A;
+    text-align: center;
+}
+
+@media (max-width: 768px) {
+    .wd-review-panel {
+        top: auto;
+        right: 0;
+        bottom: -65vh;
+        width: 100%;
+        height: auto;
+        max-height: 60vh;
+        border-left: none;
+        border-top: 0.5px solid rgba(0, 0, 0, 0.08);
+        border-radius: 20px 20px 0 0;
+        transition: bottom 0.3s ease;
+    }
+
+    .wd-review-panel.open {
+        right: 0;
+        bottom: 0;
+    }
+}
