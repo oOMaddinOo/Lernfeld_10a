@@ -23,15 +23,15 @@ namespace WaterDrop.Components.Services
 
 		private async Task<KloModel> ExecuteQuery(string query)
 		{
-			var url = "https://overpass-api.de/api/interpreter";
-			var content = new FormUrlEncodedContent(new[]
-			{
-				new KeyValuePair<string, string>("data", query)
-			});
+			var url = $"https://overpass-api.de/api/interpreter?data={Uri.EscapeDataString(query)}";
 
 			try
 			{
-				var response = await _httpClient.PostAsync(url, content);
+				var request = new HttpRequestMessage(HttpMethod.Get, url);
+				request.Headers.Add("Accept", "application/json");
+				request.Headers.Add("User-Agent", "WaterDrop/1.0");
+
+				var response = await _httpClient.SendAsync(request);
 				response.EnsureSuccessStatusCode();
 				var json = await response.Content.ReadAsStringAsync();
 
