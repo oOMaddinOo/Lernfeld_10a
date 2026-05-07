@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using WaterDrop.Components.Data;
 using WaterDrop.Components.Models;
 using WaterDrop.Components.Services;
@@ -7,9 +8,10 @@ using Xunit;
 namespace WaterDropTests.IntegrationsTests
 {
 	[Trait("Category", "Integration")]
-	public class KloServiceIntegrationTests
+	public class KloServiceIntegrationTests : IDisposable
 	{
 		private readonly ApplicationDbContext _context;
+		private readonly IMemoryCache _cache;
 		private readonly kloService _service;
 
 		public KloServiceIntegrationTests()
@@ -19,7 +21,8 @@ namespace WaterDropTests.IntegrationsTests
 				.Options;
 
 			_context = new ApplicationDbContext(options);
-			_service = new kloService(_context);
+			_cache = new MemoryCache(new MemoryCacheOptions());
+			_service = new kloService(_context, _cache);
 		}
 
 		[Fact]
@@ -300,8 +303,8 @@ namespace WaterDropTests.IntegrationsTests
 
 		public void Dispose()
 		{
-			_context.Database.EnsureDeleted();
-			_context.Dispose();
+			_context?.Dispose();
+			(_cache as IDisposable)?.Dispose();
 		}
 	}
 }
