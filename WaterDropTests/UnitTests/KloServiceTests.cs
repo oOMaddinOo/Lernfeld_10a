@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using WaterDrop.Components.Data;
 using WaterDrop.Components.Models;
 using WaterDrop.Components.Services;
@@ -10,15 +11,16 @@ namespace WaterDropTests.UnitTests
 	{
 		private readonly ApplicationDbContext _context;
 		private readonly kloService _service;
+		private readonly IMemoryCache _cache;
 
 		public KloServiceTests()
 		{
 			var options = new DbContextOptionsBuilder<ApplicationDbContext>()
 				.UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
 				.Options;
-
+			_cache = new MemoryCache(new MemoryCacheOptions());
 			_context = new ApplicationDbContext(options);
-			_service = new kloService(_context);
+			_service = new kloService(_context, _cache);
 		}
 
 		[Fact]
