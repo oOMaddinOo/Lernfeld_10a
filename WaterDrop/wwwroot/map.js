@@ -373,9 +373,21 @@ function buildPopupWithReview(baseContent, reviewText) {
 }
 
 window.updateMarkersWithReview = function (elementIdStr, reviewText) {
+    // Behalten für Rückwärtskompatibilität — verwendet keine Bild-URL.
     const markers = window.markersByElementId && window.markersByElementId[elementIdStr];
     if (!markers) return;
     for (const m of markers) {
         m.setPopupContent(buildPopupWithReview(m._basePopupContent, reviewText));
+    }
+};
+
+// Neuer Helper: aktualisiert das Popup eines Markers mit Kommentar UND Bild.
+// Wird nach Add/Edit/Delete aus Blazor aufgerufen, damit das Popup immer den
+// neuesten Review zeigt.
+window.updateMarkersWithReviewAndPicture = function (elementIdStr, reviewText, pictureUrl) {
+    const markers = window.markersByElementId && window.markersByElementId[elementIdStr];
+    if (!markers) return;
+    for (const m of markers) {
+        m.setPopupContent(buildPopupWithReviewAndPicture(m._basePopupContent, reviewText, pictureUrl));
     }
 };

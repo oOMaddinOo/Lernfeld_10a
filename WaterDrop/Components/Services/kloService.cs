@@ -138,6 +138,10 @@ namespace WaterDrop.Components.Services
 
 		public async Task AddKloCommentToData(DatabaseKloModel klomodel)
 		{
+			// Stempel den Erstellungszeitpunkt, falls der Aufrufer ihn nicht
+			// gesetzt hat. So bekommt jeder neue Review automatisch ein
+			// CreatedAt, ohne dass jede UI-Stelle das selbst tun muss.
+			klomodel.CreatedAt ??= DateTime.UtcNow;
 			_context.DatabaseKloModel.Add(klomodel);
 			await _context.SaveChangesAsync();
 			InvalidateDbCache();
@@ -199,20 +203,27 @@ namespace WaterDrop.Components.Services
 			_cache.Set(DbCacheTimestampKey, DateTime.UtcNow, cacheOptions);
 		}
 
+		/// <summary>
+		/// Gibt für jede ElementId genau den NEUESTEN Review zurück.
+		/// Mehrere Reviews pro Ort sind nun ausdrücklich erlaubt — diese Methode
+		/// dient nur der Karten-/Popup-Ansicht, wo nur der jüngste Eintrag gezeigt wird.
+		/// Für die vollständige Historie pro Ort: <see cref="GetAllKlosByElementId"/>.
+		/// </summary>
 		public async Task<Dictionary<long, DatabaseKloModel>> GetAllKloDataAsDictionary()
 		{
 			var allData = await GetAllKloData();
-			
+
+			// Sortierung: zuerst nach CreatedAt (neueste zuerst). Legacy-Zeilen ohne
+			// CreatedAt bekommen DateTime.MinValue zugewiesen und landen damit unten.
+			// Id dient als deterministischer Tiebreaker, falls zwei Reviews exakt
+			// dieselbe Zeit haben (sehr unwahrscheinlich, aber stabil ist besser).
 			var dictionary = allData
 				.GroupBy(k => k.ElementId)
-				.Select(g => g.OrderByDescending(k => k.Id).First())
+				.Select(g => g
+					.OrderByDescending(k => k.CreatedAt ?? DateTime.MinValue)
+					.ThenByDescending(k => k.Id)
+					.First())
 				.ToDictionary(k => k.ElementId, k => k);
-
-			var duplicateCount = allData.Count - dictionary.Count;
-			if (duplicateCount > 0)
-			{
-				Console.WriteLine($"WARNUNG: {duplicateCount} Duplikat(e) in der Datenbank gefunden und automatisch bereinigt.");
-			}
 
 			return dictionary;
 		}
@@ -237,6 +248,23 @@ namespace WaterDrop.Components.Services
 		{
 			var dictionary = await GetAllKloDataAsDictionary();
 			return dictionary.TryGetValue(elementId, out var klo) ? klo : null;
+		}
+
+		/// <summary>
+		/// Gibt ALLE Reviews für einen Ort (ElementId) zurück, sortiert nach
+		/// Erstellungszeitpunkt absteigend (neuester zuerst). Wird vom
+		/// "Mehr Reviews"-Panel verwendet, um die Historie pro Toilette/
+		/// Wasserstelle anzuzeigen.
+		/// </summary>
+		public async Task<List<DatabaseKloModel>> GetAllKlosByElementId(long elementId)
+		{
+			var allData = await GetAllKloData();
+
+			return allData
+				.Where(k => k.ElementId == elementId)
+				.OrderByDescending(k => k.CreatedAt ?? DateTime.MinValue)
+				.ThenByDescending(k => k.Id)
+				.ToList();
 		}
 
 		public async Task DeleteKloDataComment(Guid? kloId)
@@ -270,28 +298,9 @@ namespace WaterDrop.Components.Services
 			return await _context.DatabaseKloModel.FirstOrDefaultAsync(k => k.Id == kloId);
 		}
 
-		public async Task<int> RemoveDuplicateElementIds()
-		{
-			var allData = await _context.DatabaseKloModel.ToListAsync();
-			
-			var duplicates = allData
-				.GroupBy(k => k.ElementId)
-				.Where(g => g.Count() > 1)
-				.SelectMany(g => g.OrderByDescending(k => k.Id).Skip(1))
-				.ToList();
-
-			if (duplicates.Any())
-			{
-				_context.DatabaseKloModel.RemoveRange(duplicates);
-				await _context.SaveChangesAsync();
-				InvalidateDbCache();
-				
-				Console.WriteLine($"{duplicates.Count} Duplikat(e) aus der Datenbank entfernt.");
-				return duplicates.Count;
-			}
-
-			return 0;
-		}
+		// HINWEIS: Die frühere Methode `RemoveDuplicateElementIds` wurde entfernt.
+		// Mehrere Reviews pro ElementId sind nun ein gewolltes Feature ("Mehr Reviews"-
+		// Panel zeigt die Historie). Duplikate dürfen nicht automatisch gelöscht werden.
 
 		private void InvalidateDbCache()
 		{

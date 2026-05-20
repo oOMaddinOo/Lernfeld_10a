@@ -1,0 +1,4 @@
+# Diese Datei sorgt dafür, dass der Ordner `wwwroot/uploads/` im Repo existiert,
+# ohne dass tatsächliche User-Uploads eingecheckt werden.
+# Echte hochgeladene Bilder werden über die .gitignore-Regel
+# `/WaterDrop/wwwroot/uploads/*` aus dem Repo ferngehalten.
