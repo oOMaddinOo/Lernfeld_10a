@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 
 namespace WaterDrop.Components.Services
 {
-	public class GeocodingService
+	public class GeocodingService : IGeocodingService
 	{
 		private readonly IMemoryCache _cache;
 		private readonly ILogger<GeocodingService> _logger;

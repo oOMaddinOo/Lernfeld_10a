@@ -1,5 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
+using Moq;
 using WaterDrop.Components.Data;
 using WaterDrop.Components.Models;
 using WaterDrop.Components.Services;
@@ -13,6 +15,8 @@ namespace WaterDropTests.IntegrationsTests
 		private readonly ApplicationDbContext _context;
 		private readonly IMemoryCache _cache;
 		private readonly kloService _service;
+		private readonly Mock<ILogger<kloService>> _mockLogger;
+		private readonly Mock<IGeocodingService> _mockGeocodingService;
 
 		public KloServiceIntegrationTests()
 		{
@@ -22,37 +26,26 @@ namespace WaterDropTests.IntegrationsTests
 
 			_context = new ApplicationDbContext(options);
 			_cache = new MemoryCache(new MemoryCacheOptions());
-			_service = new kloService(_context, _cache);
+			_mockLogger = new Mock<ILogger<kloService>>();
+			_mockGeocodingService = new Mock<IGeocodingService>();
+			_service = new kloService(_context, _cache, _mockLogger.Object, _mockGeocodingService.Object);
 		}
 
 		[Fact]
-		public async Task FullCrudWorkflow_ShouldWorkEndToEnd()
+		public async Task AddKloCommentToData_ShouldPersistToDatabase()
 		{
 			// Arrange
 			var kloModel = CreateTestKloModel("Integration Test", 123456);
 
-			// Act & Assert - Add
+			// Act
 			await _service.AddKloCommentToData(kloModel);
-			var allData = await _service.GetAllKloData();
-			Assert.Single(allData);
-			Assert.Equal("Integration Test", allData[0].Comment);
-			Assert.Equal(123456, allData[0].ElementId);
 
-			// Act & Assert - Get One
-			var singleKlo = await _service.GetOneKloData(kloModel.Id);
-			Assert.NotNull(singleKlo);
-			Assert.Equal("Integration Test", singleKlo.Comment);
-
-			// Act & Assert - Update
-			singleKlo.Comment = "Updated Integration Test";
-			await _service.UpdateCommentData(singleKlo);
-			var updatedKlo = await _service.GetOneKloData(kloModel.Id);
-			Assert.Equal("Updated Integration Test", updatedKlo.Comment);
-
-			// Act & Assert - Delete
-			await _service.DeleteKloDataComment(kloModel.Id);
-			var afterDelete = await _service.GetAllKloData();
-			Assert.Empty(afterDelete);
+			// Assert
+			var result = await _context.DatabaseKloModel.FindAsync(kloModel.Id);
+			Assert.NotNull(result);
+			Assert.Equal("Integration Test", result.Comment);
+			Assert.Equal(123456, result.ElementId);
+			Assert.Single(_context.DatabaseKloModel);
 		}
 
 		[Fact]
@@ -69,7 +62,7 @@ namespace WaterDropTests.IntegrationsTests
 			await _service.AddKloCommentToData(klo3);
 
 			// Assert
-			var allKlos = await _service.GetAllKloData();
+			var allKlos = await _context.DatabaseKloModel.ToListAsync();
 			Assert.Equal(3, allKlos.Count);
 
 			// Verify all have correct data
@@ -81,43 +74,28 @@ namespace WaterDropTests.IntegrationsTests
 		}
 
 		[Fact]
-		public async Task UpdateKloModel_WithChangedProperties_ShouldPersistChanges()
+		public async Task UpdateCommentData_WithChangedProperties_ShouldPersistChanges()
 		{
 			// Arrange
 			var kloModel = CreateTestKloModel("Original", 444444);
 			await _service.AddKloCommentToData(kloModel);
 
+			// Detach to simulate a fresh context
+			_context.Entry(kloModel).State = EntityState.Detached;
+
 			// Act - Load and modify
-			var loadedKlo = await _service.GetOneKloData(kloModel.Id);
+			var loadedKlo = await _context.DatabaseKloModel.FirstAsync(k => k.Id == kloModel.Id);
 			loadedKlo.Comment = "Modified Comment";
 			loadedKlo.PictureUrl = "https://example.com/new-picture.jpg";
 
 			await _service.UpdateCommentData(loadedKlo);
 
 			// Assert
-			var updatedKlo = await _service.GetOneKloData(kloModel.Id);
+			var updatedKlo = await _context.DatabaseKloModel.FindAsync(kloModel.Id);
+			Assert.NotNull(updatedKlo);
 			Assert.Equal("Modified Comment", updatedKlo.Comment);
 			Assert.Equal("https://example.com/new-picture.jpg", updatedKlo.PictureUrl);
 			Assert.Equal(444444, updatedKlo.ElementId);
-		}
-
-		[Fact]
-		public async Task DeleteKloModel_ShouldRemoveFromDatabase()
-		{
-			// Arrange
-			var kloModel = CreateTestKloModel("To Delete", 555555);
-			await _service.AddKloCommentToData(kloModel);
-
-			// Verify it exists
-			var existingKlo = await _service.GetOneKloData(kloModel.Id);
-			Assert.NotNull(existingKlo);
-
-			// Act
-			await _service.DeleteKloDataComment(kloModel.Id);
-
-			// Assert
-			var klo = await _service.GetOneKloData(kloModel.Id);
-			Assert.Null(klo);
 		}
 
 		[Fact]
@@ -133,44 +111,11 @@ namespace WaterDropTests.IntegrationsTests
 			await Task.WhenAll(tasks);
 
 			// Assert
-			var allKlos = await _service.GetAllKloData();
+			var allKlos = await _context.DatabaseKloModel.ToListAsync();
 			Assert.Equal(10, allKlos.Count);
 			Assert.Equal(10, allKlos.Select(k => k.ElementId).Distinct().Count());
 		}
 
-		[Fact]
-		public async Task GetAllKloData_WithLargeDataset_ShouldReturnAllRecords()
-		{
-			// Arrange - Add 50 records
-			for (int i = 0; i < 50; i++)
-			{
-				var klo = CreateTestKloModel($"Bulk Test {i}", 2000000 + i);
-				await _service.AddKloCommentToData(klo);
-			}
-
-			// Act
-			var allKlos = await _service.GetAllKloData();
-
-			// Assert
-			Assert.Equal(50, allKlos.Count);
-			Assert.All(allKlos, klo =>
-			{
-				Assert.NotNull(klo.Comment);
-				Assert.NotEqual(0, klo.ElementId);
-			});
-		}
-
-		[Fact]
-		public async Task DeleteNonExistentKlo_ShouldNotThrowException()
-		{
-			// Arrange
-			var nonExistentId = Guid.NewGuid();
-
-			// Act & Assert - Should not throw
-			await _service.DeleteKloDataComment(nonExistentId);
-			var allData = await _service.GetAllKloData();
-			Assert.Empty(allData);
-		}
 
 		[Fact]
 		public async Task GetOneKloData_AfterMultipleUpdates_ShouldReturnLatestVersion()
@@ -182,13 +127,15 @@ namespace WaterDropTests.IntegrationsTests
 			// Act - Multiple updates
 			for (int i = 2; i <= 5; i++)
 			{
-				var klo = await _service.GetOneKloData(kloModel.Id);
+				_context.Entry(kloModel).State = EntityState.Detached;
+				var klo = await _context.DatabaseKloModel.FirstAsync(k => k.Id == kloModel.Id);
 				klo.Comment = $"Version {i}";
 				await _service.UpdateCommentData(klo);
 			}
 
 			// Assert
-			var finalKlo = await _service.GetOneKloData(kloModel.Id);
+			var finalKlo = await _context.DatabaseKloModel.FindAsync(kloModel.Id);
+			Assert.NotNull(finalKlo);
 			Assert.Equal("Version 5", finalKlo.Comment);
 		}
 
@@ -231,6 +178,78 @@ namespace WaterDropTests.IntegrationsTests
 		}
 
 		[Fact]
+		public async Task GetKloByElementId_WithNonExistentElementId_ShouldReturnNull()
+		{
+			// Arrange
+			var nonExistentElementId = 999999999L;
+
+			// Act
+			var result = await _service.GetKloByElementId(nonExistentElementId);
+
+			// Assert
+			Assert.Null(result);
+		}
+
+		[Fact]
+		public async Task GetKlosByElementIds_ShouldReturnMatchingKloModels()
+		{
+			// Arrange
+			var klo1 = CreateTestKloModel("Kommentar 1", 111111);
+			var klo2 = CreateTestKloModel("Kommentar 2", 222222);
+			var klo3 = CreateTestKloModel("Kommentar 3", 333333);
+			
+			await _service.AddKloCommentToData(klo1);
+			await _service.AddKloCommentToData(klo2);
+			await _service.AddKloCommentToData(klo3);
+
+			// Act
+			var result = await _service.GetKlosByElementIds(new[] { 111111L, 333333L });
+
+			// Assert
+			Assert.NotNull(result);
+			Assert.Equal(2, result.Count);
+			Assert.Contains(result, k => k.ElementId == 111111);
+			Assert.Contains(result, k => k.ElementId == 333333);
+			Assert.DoesNotContain(result, k => k.ElementId == 222222);
+		}
+
+		[Fact]
+		public async Task GetKlosByElementIds_WithEmptyArray_ShouldReturnEmptyList()
+		{
+			// Arrange
+			var klo1 = CreateTestKloModel("Kommentar 1", 111111);
+			await _service.AddKloCommentToData(klo1);
+
+			// Act
+			var result = await _service.GetKlosByElementIds(Array.Empty<long>());
+
+			// Assert
+			Assert.NotNull(result);
+			Assert.Empty(result);
+		}
+
+		[Fact]
+		public async Task GetKlosByElementIds_WithLargeDataset_ShouldReturnOnlyRequestedIds()
+		{
+			// Arrange
+			for (int i = 1; i <= 100; i++)
+			{
+				var klo = CreateTestKloModel($"Klo {i}", 1000 + i);
+				await _service.AddKloCommentToData(klo);
+			}
+
+			var requestedIds = new[] { 1010L, 1025L, 1050L, 1075L, 1090L };
+
+			// Act
+			var result = await _service.GetKlosByElementIds(requestedIds);
+
+			// Assert
+			Assert.NotNull(result);
+			Assert.Equal(5, result.Count);
+			Assert.All(requestedIds, id => Assert.Contains(result, k => k.ElementId == id));
+		}
+
+		[Fact]
 		public async Task UpdateKloModel_ShouldNotChangeElementId()
 		{
 			// Arrange
@@ -238,14 +257,18 @@ namespace WaterDropTests.IntegrationsTests
 			var kloModel = CreateTestKloModel("Original", originalElementId);
 			await _service.AddKloCommentToData(kloModel);
 
+			// Detach to simulate a fresh context
+			_context.Entry(kloModel).State = EntityState.Detached;
+
 			// Act
-			var loadedKlo = await _service.GetOneKloData(kloModel.Id);
+			var loadedKlo = await _context.DatabaseKloModel.FirstAsync(k => k.Id == kloModel.Id);
 			loadedKlo.Comment = "Updated";
 			loadedKlo.PictureUrl = "https://example.com/updated.jpg";
 			await _service.UpdateCommentData(loadedKlo);
 
 			// Assert
-			var updatedKlo = await _service.GetOneKloData(kloModel.Id);
+			var updatedKlo = await _context.DatabaseKloModel.FindAsync(kloModel.Id);
+			Assert.NotNull(updatedKlo);
 			Assert.Equal(originalElementId, updatedKlo.ElementId);
 			Assert.Equal("Updated", updatedKlo.Comment);
 		}
@@ -263,7 +286,7 @@ namespace WaterDropTests.IntegrationsTests
 			await _service.AddKloCommentToData(klo2);
 
 			// Assert
-			var allKlos = await _service.GetAllKloData();
+			var allKlos = await _context.DatabaseKloModel.ToListAsync();
 			Assert.Equal(2, allKlos.Count);
 			Assert.All(allKlos, klo => Assert.Equal(elementId, klo.ElementId));
 		}
@@ -284,10 +307,251 @@ namespace WaterDropTests.IntegrationsTests
 			await _service.AddKloCommentToData(kloModel);
 
 			// Assert
-			var savedKlo = await _service.GetOneKloData(kloModel.Id);
+			var savedKlo = await _context.DatabaseKloModel.FindAsync(kloModel.Id);
 			Assert.NotNull(savedKlo);
 			Assert.Null(savedKlo.PictureUrl);
 			Assert.Equal("No Picture", savedKlo.Comment);
+		}
+
+		[Fact]
+		public async Task GetToiletsByCity_ShouldReturnToiletsFromDatabaseWithinBoundingBox()
+		{
+			// Arrange
+			var city = "Hamburg";
+			var bbox = new BoundingBox
+			{
+				MinLat = 53.395,
+				MaxLat = 53.745,
+				MinLon = 9.731,
+				MaxLon = 10.325,
+				DisplayName = "Hamburg, Deutschland"
+			};
+
+			_mockGeocodingService
+				.Setup(x => x.GetCityBoundingBoxAsync(city))
+				.ReturnsAsync(bbox);
+
+			// Toiletten in Hamburg und außerhalb hinzufügen
+			_context.Toilets.AddRange(
+				new ToiletData { Id = Guid.NewGuid(), ElementId = 1, Lat = 53.5, Lon = 10.0, Type = "node", Tags = new() },
+				new ToiletData { Id = Guid.NewGuid(), ElementId = 2, Lat = 53.6, Lon = 10.1, Type = "node", Tags = new() },
+				new ToiletData { Id = Guid.NewGuid(), ElementId = 3, Lat = 50.0, Lon = 8.0, Type = "node", Tags = new() } // Außerhalb Hamburg
+			);
+			await _context.SaveChangesAsync();
+
+			// Act
+			var result = await _service.GetToiletsByCity(city);
+
+			// Assert
+			Assert.NotNull(result);
+			Assert.Equal(2, result.Elements.Count);
+			Assert.All(result.Elements, e =>
+			{
+				Assert.NotNull(e.Lat);
+				Assert.NotNull(e.Lon);
+				Assert.InRange(e.Lat.Value, bbox.MinLat, bbox.MaxLat);
+				Assert.InRange(e.Lon.Value, bbox.MinLon, bbox.MaxLon);
+			});
+		}
+
+		[Fact]
+		public async Task GetToiletsByCity_WithNullOrEmptyCity_ShouldUseHamburgAsDefault()
+		{
+			// Arrange
+			var defaultBbox = new BoundingBox
+			{
+				MinLat = 53.395,
+				MaxLat = 53.745,
+				MinLon = 9.731,
+				MaxLon = 10.325,
+				DisplayName = "Hamburg, Deutschland"
+			};
+
+			_mockGeocodingService
+				.Setup(x => x.GetCityBoundingBoxAsync("Hamburg"))
+				.ReturnsAsync(defaultBbox);
+
+			_context.Toilets.Add(
+				new ToiletData { Id = Guid.NewGuid(), ElementId = 1, Lat = 53.5, Lon = 10.0, Type = "node", Tags = new() }
+			);
+			await _context.SaveChangesAsync();
+
+			// Act
+			var result = await _service.GetToiletsByCity(null);
+
+			// Assert
+			Assert.NotNull(result);
+			_mockGeocodingService.Verify(x => x.GetCityBoundingBoxAsync("Hamburg"), Times.Once);
+		}
+
+		[Fact]
+		public async Task GetToiletsByCity_WithMultipleCalls_ShouldUseCaching()
+		{
+			// Arrange
+			var city = "Berlin";
+			var bbox = new BoundingBox
+			{
+				MinLat = 52.338,
+				MaxLat = 52.676,
+				MinLon = 13.088,
+				MaxLon = 13.761,
+				DisplayName = "Berlin, Deutschland"
+			};
+
+			_mockGeocodingService
+				.Setup(x => x.GetCityBoundingBoxAsync(city))
+				.ReturnsAsync(bbox);
+
+			_context.Toilets.Add(
+				new ToiletData { Id = Guid.NewGuid(), ElementId = 1, Lat = 52.5, Lon = 13.4, Type = "node", Tags = new() }
+			);
+			await _context.SaveChangesAsync();
+
+			// Act
+			var result1 = await _service.GetToiletsByCity(city);
+			var result2 = await _service.GetToiletsByCity(city);
+
+			// Assert
+			Assert.NotNull(result1);
+			Assert.NotNull(result2);
+			Assert.Same(result1, result2); // Sollte dasselbe gecachte Objekt sein
+			_mockGeocodingService.Verify(x => x.GetCityBoundingBoxAsync(city), Times.Once); // Nur einmal aufgerufen
+		}
+
+		[Fact]
+		public async Task GetToiletsByCity_WithDifferentCities_ShouldReturnDifferentResults()
+		{
+			// Arrange
+			var hamburgBbox = new BoundingBox
+			{
+				MinLat = 53.395,
+				MaxLat = 53.745,
+				MinLon = 9.731,
+				MaxLon = 10.325,
+				DisplayName = "Hamburg, Deutschland"
+			};
+
+			var berlinBbox = new BoundingBox
+			{
+				MinLat = 52.338,
+				MaxLat = 52.676,
+				MinLon = 13.088,
+				MaxLon = 13.761,
+				DisplayName = "Berlin, Deutschland"
+			};
+
+			_mockGeocodingService
+				.Setup(x => x.GetCityBoundingBoxAsync("Hamburg"))
+				.ReturnsAsync(hamburgBbox);
+
+			_mockGeocodingService
+				.Setup(x => x.GetCityBoundingBoxAsync("Berlin"))
+				.ReturnsAsync(berlinBbox);
+
+			// Toiletten in verschiedenen Städten hinzufügen
+			_context.Toilets.AddRange(
+				new ToiletData { Id = Guid.NewGuid(), ElementId = 1, Lat = 53.5, Lon = 10.0, Type = "node", Tags = new() }, // Hamburg
+				new ToiletData { Id = Guid.NewGuid(), ElementId = 2, Lat = 52.5, Lon = 13.4, Type = "node", Tags = new() }  // Berlin
+			);
+			await _context.SaveChangesAsync();
+
+			// Act
+			var hamburgResult = await _service.GetToiletsByCity("Hamburg");
+			var berlinResult = await _service.GetToiletsByCity("Berlin");
+
+			// Assert
+			Assert.NotNull(hamburgResult);
+			Assert.NotNull(berlinResult);
+			Assert.Single(hamburgResult.Elements);
+			Assert.Single(berlinResult.Elements);
+			Assert.NotSame(hamburgResult, berlinResult);
+		}
+
+		[Fact]
+		public async Task GetToiletsByCity_WithLargeDataset_ShouldFilterCorrectly()
+		{
+			// Arrange
+			var city = "München";
+			var bbox = new BoundingBox
+			{
+				MinLat = 48.061,
+				MaxLat = 48.248,
+				MinLon = 11.360,
+				MaxLon = 11.723,
+				DisplayName = "München, Deutschland"
+			};
+
+			_mockGeocodingService
+				.Setup(x => x.GetCityBoundingBoxAsync(city))
+				.ReturnsAsync(bbox);
+
+			// 100 Toiletten hinzufügen - 50 innerhalb, 50 außerhalb
+			var toilets = new List<ToiletData>();
+			for (int i = 0; i < 50; i++)
+			{
+				toilets.Add(new ToiletData 
+				{ 
+					Id = Guid.NewGuid(), 
+					ElementId = i, 
+					Lat = 48.1 + (i * 0.001), 
+					Lon = 11.5 + (i * 0.001), 
+					Type = "node", 
+					Tags = new() 
+				}); // Innerhalb
+			}
+			for (int i = 50; i < 100; i++)
+			{
+				toilets.Add(new ToiletData 
+				{ 
+					Id = Guid.NewGuid(), 
+					ElementId = i, 
+					Lat = 50.0 + (i * 0.001), 
+					Lon = 8.0 + (i * 0.001), 
+					Type = "node", 
+					Tags = new() 
+				}); // Außerhalb
+			}
+			_context.Toilets.AddRange(toilets);
+			await _context.SaveChangesAsync();
+
+			// Act
+			var result = await _service.GetToiletsByCity(city);
+
+			// Assert
+			Assert.NotNull(result);
+			Assert.Equal(50, result.Elements.Count);
+			Assert.All(result.Elements, e =>
+			{
+				Assert.NotNull(e.Lat);
+				Assert.NotNull(e.Lon);
+				Assert.InRange(e.Lat.Value, bbox.MinLat, bbox.MaxLat);
+				Assert.InRange(e.Lon.Value, bbox.MinLon, bbox.MaxLon);
+			});
+		}
+
+		[Fact]
+		public async Task GetToiletsByCity_WithNullBoundingBox_ShouldUseDefaultHamburgBbox()
+		{
+			// Arrange
+			var city = "UnknownCity";
+			
+			_mockGeocodingService
+				.Setup(x => x.GetCityBoundingBoxAsync(city))
+				.ReturnsAsync((BoundingBox)null);
+
+			_context.Toilets.AddRange(
+				new ToiletData { Id = Guid.NewGuid(), ElementId = 1, Lat = 53.5, Lon = 10.0, Type = "node", Tags = new() }, // In Hamburg Default bbox
+				new ToiletData { Id = Guid.NewGuid(), ElementId = 2, Lat = 50.0, Lon = 8.0, Type = "node", Tags = new() }   // Außerhalb
+			);
+			await _context.SaveChangesAsync();
+
+			// Act
+			var result = await _service.GetToiletsByCity(city);
+
+			// Assert
+			Assert.NotNull(result);
+			Assert.Single(result.Elements); // Nur die Toilette innerhalb der Default-Hamburg-BoundingBox
+			Assert.Equal(1, result.Elements[0].ElementId);
 		}
 
 		private DatabaseKloModel CreateTestKloModel(string comment, long elementId)
