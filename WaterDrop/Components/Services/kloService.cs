@@ -11,13 +11,13 @@ namespace WaterDrop.Components.Services
 		private readonly ApplicationDbContext _context;
 		private readonly IMemoryCache _cache;
 		private readonly ILogger<kloService> _logger;
-		private readonly GeocodingService _geocodingService;
+		private readonly IGeocodingService _geocodingService;
 		
 		public kloService(
 			ApplicationDbContext context, 
 			IMemoryCache cache,
 			ILogger<kloService> logger,
-			GeocodingService geocodingService)
+			IGeocodingService geocodingService)
 		{
 			_context = context;
 			_cache = cache;

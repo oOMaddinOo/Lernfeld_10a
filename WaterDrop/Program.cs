@@ -19,7 +19,7 @@ namespace WaterDrop
                 options.UseSqlServer(builder.Configuration.GetConnectionString("DatabaseConnection")));
 
             builder.Services.AddScoped<kloService>();
-			builder.Services.AddScoped<GeocodingService>();
+			builder.Services.AddScoped<IGeocodingService, GeocodingService>();
 
 			builder.Services.AddMemoryCache();
 
