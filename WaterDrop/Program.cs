@@ -16,11 +16,12 @@ namespace WaterDrop
                 .AddInteractiveServerComponents();
 
             builder.Services.AddDbContext<ApplicationDbContext>(options => 
-                options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+                options.UseSqlServer(builder.Configuration.GetConnectionString("DatabaseConnection")));
 
             builder.Services.AddScoped<kloService>();
-            
-            builder.Services.AddMemoryCache();
+			builder.Services.AddScoped<GeocodingService>();
+
+			builder.Services.AddMemoryCache();
 
             var app = builder.Build();
 
@@ -40,7 +41,7 @@ namespace WaterDrop
             app.MapRazorComponents<App>()
                 .AddInteractiveServerRenderMode();
 
-            app.Run();
+			app.Run();
         }
     }
 }
