@@ -1,9 +1,8 @@
 @page "/"
-@using Microsoft.AspNetCore.Components.Forms
-@using Microsoft.AspNetCore.Hosting
+@using Microsoft.Extensions.Caching.Memory
 @inject IJSRuntime JS
 @inject kloService kloService
-@inject IWebHostEnvironment WebHostEnv
+@inject IMemoryCache Cache
 @implements IAsyncDisposable
 @rendermode InteractiveServer
 
@@ -220,8 +219,6 @@
 
 
 @code {
-   
-
     private record CategoryDef(string Key, string Label, string Color);
 
     private List<CategoryDef> categories = new()
@@ -305,7 +302,10 @@
         if (string.IsNullOrWhiteSpace(cityInput))
             return;
 
+        cityInput = cityInput.Trim();
         cityInput = char.ToUpper(cityInput[0]) + cityInput.Substring(1).ToLower();
+
+        Console.WriteLine($"SearchAllActive aufgerufen mit cityInput: '{cityInput}'");
 
         foreach (var cat in categories.Select(c => c.Key))
             await JS.InvokeVoidAsync("clearCategoryLayer", cat);
@@ -325,33 +325,47 @@
 
             if (activeCats.Any(c => c is "restrooms" or "accessible" or "changing_table"))
             {
-                var toiletBuilder = new ToiletQueryBuilder()
-                    .SetCity(cityInput)
-                    .SetAmenityType("toilets");
-                var toiletResult = await kloService.GetToilets(toiletBuilder);
+                Console.WriteLine($"Lade Toiletten für Stadt: '{cityInput}'");
+                
+                var toiletResult = await kloService.GetToiletsByCity(cityInput);
+                
+                Console.WriteLine($"{toiletResult.Elements.Count} Toiletten erhalten");
+                
                 foreach (var e in toiletResult.Elements)
                 {
                     var lat = e.Lat ?? e.Center?.Lat;
                     var lon = e.Lon ?? e.Center?.Lon;
                     if (lat.HasValue && lon.HasValue)
-                        elementDtos.Add(new { id = e.ElementId.ToString(), lat = lat.Value, lon = lon.Value, tags = e.Tags ?? new Dictionary<string, string>() });
+                        elementDtos.Add(new { 
+                            id = e.ElementId.ToString(), 
+                            lat = lat.Value, 
+                            lon = lon.Value, 
+                            tags = e.Tags ?? new Dictionary<string, string>() 
+                        });
                 }
             }
 
             if (activeCats.Contains("drinking_water"))
             {
-                var waterBuilder = new ToiletQueryBuilder()
-                    .SetCity(cityInput)
-                    .SetAmenityType("drinking_water");
-                var waterResult = await kloService.GetToilets(waterBuilder);
+                Console.WriteLine($"Lade Trinkwasser für Stadt: '{cityInput}'");
+
+                var waterResult = await kloService.GetToiletsByCity(cityInput);
+                
                 foreach (var e in waterResult.Elements)
                 {
                     var lat = e.Lat ?? e.Center?.Lat;
                     var lon = e.Lon ?? e.Center?.Lon;
                     if (lat.HasValue && lon.HasValue)
-                        elementDtos.Add(new { id = e.ElementId.ToString(), lat = lat.Value, lon = lon.Value, tags = e.Tags ?? new Dictionary<string, string>() });
+                        elementDtos.Add(new { 
+                            id = e.ElementId.ToString(), 
+                            lat = lat.Value, 
+                            lon = lon.Value, 
+                            tags = e.Tags ?? new Dictionary<string, string>() 
+                        });
                 }
             }
+
+            Console.WriteLine($"Insgesamt {elementDtos.Count} Elemente gefunden");
 
             var result = await JS.InvokeAsync<Dictionary<string, int>>("addCategoryElements", elementDtos, activeCats);
             foreach (var cat in activeCats)
@@ -657,7 +671,14 @@
         return ValueTask.CompletedTask;
     }
 
-
-   
-
-}
+    private void ClearCache()
+    {
+        var cities = new[] { "hamburg", "berlin", "köln", "münchen", "dortmund" };
+        foreach (var city in cities)
+        {
+            Cache.Remove($"toilets_{city}");
+            Cache.Remove($"bbox_{city}");
+        }
+        Console.WriteLine("Cache gelöscht!");
+    }
+    }

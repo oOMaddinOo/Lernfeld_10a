@@ -1,6 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using Newtonsoft.Json;
+using Microsoft.Extensions.Logging;
 using WaterDrop.Components.Data;
 using WaterDrop.Components.Models;
 
@@ -8,326 +8,151 @@ namespace WaterDrop.Components.Services
 {
 	public class kloService
 	{
-		private static readonly HttpClient _httpClient = new HttpClient();
 		private readonly ApplicationDbContext _context;
 		private readonly IMemoryCache _cache;
+		private readonly ILogger<kloService> _logger;
+		private readonly IGeocodingService _geocodingService;
 		
-		// Cache bleibt 7 Tage gespeichert
-		private static readonly TimeSpan CacheDuration = TimeSpan.FromDays(7);
-
-		// Update im Hintergrund nach 1 Stunde
-		private static readonly TimeSpan RefreshThreshold = TimeSpan.FromHours(1);
-		private const string DbCacheKey = "all_klo_data";
-		private const string DbCacheTimestampKey = "all_klo_data_timestamp";
-
-		public kloService(ApplicationDbContext context, IMemoryCache cache)
+		public kloService(
+			ApplicationDbContext context, 
+			IMemoryCache cache,
+			ILogger<kloService> logger,
+			IGeocodingService geocodingService)
 		{
 			_context = context;
 			_cache = cache;
+			_logger = logger;
+			_geocodingService = geocodingService;
 		}
 
-		/// <summary>
-		/// Stale-While-Revalidate: Gibt sofort Cache zurück, updated im Hintergrund
-		/// </summary>
-		public async Task<KloModel> GetToilets(ToiletQueryBuilder queryBuilder)
+		public async Task<KloModel> GetToiletsByCity(string city)
 		{
-			var query = queryBuilder.Build();
-			var cacheKey = $"toilets_{GetQueryHash(query)}";
-			var timestampKey = $"{cacheKey}_timestamp";
-
-			// Versuche aus Cache zu laden
+			_logger.LogInformation("GetToiletsByCity aufgerufen mit: '{City}'", city);
+			
+			if (string.IsNullOrWhiteSpace(city))
+			{
+				city = "Hamburg";
+				_logger.LogWarning("Keine Stadt angegeben - nutze Default: Hamburg");
+			}
+			
+			var cacheKey = $"toilets_{city}";
+			
+			_logger.LogInformation("Cache-Key: {CacheKey}", cacheKey);
+			
 			if (_cache.TryGetValue<KloModel>(cacheKey, out var cachedResult))
 			{
-				Console.WriteLine($"Cache HIT für Query: {cacheKey}");
-				
-				// Prüfe ob Update im Hintergrund nötig ist
-				if (_cache.TryGetValue<DateTime>(timestampKey, out var lastUpdate))
-				{
-					var age = DateTime.UtcNow - lastUpdate;
-					if (age > RefreshThreshold)
-					{
-						Console.WriteLine($"Cache ist {age.TotalMinutes:F0} Min alt - starte Background-Update");
-						// Fire & Forget - Update im Hintergrund
-						_ = Task.Run(async () => await UpdateCacheInBackground(query, cacheKey, timestampKey));
-					}
-				}
-
+				_logger.LogInformation("Cache HIT für {City} - {Count} Toiletten", city, cachedResult.Elements.Count);
 				return cachedResult;
 			}
 
-			Console.WriteLine($"Cache MISS für Query: {cacheKey}");
+			_logger.LogInformation("Cache MISS - lade Daten für {City}", city);
+
+			var bbox = await _geocodingService.GetCityBoundingBoxAsync(city);
 			
-			// Kein Cache vorhanden - muss warten
-			var result = await ExecuteQuery(query);
-			SetCacheWithTimestamp(cacheKey, timestampKey, result);
+			if (bbox == null)
+			{
+				_logger.LogWarning("Keine Bounding Box für {City} gefunden - nutze Default (Hamburg)", city);
+				bbox = new BoundingBox
+				{
+					MinLat = 53.395,
+					MaxLat = 53.745,
+					MinLon = 9.731,
+					MaxLon = 10.325,
+					DisplayName = "Hamburg, Deutschland (Default)"
+				};
+			}
+
+			_logger.LogInformation("Bounding Box für {City}: {BBox}", city, bbox);
+
+			var toilets = await _context.Toilets
+				.Where(t => t.Lat >= bbox.MinLat && t.Lat <= bbox.MaxLat &&
+				            t.Lon >= bbox.MinLon && t.Lon <= bbox.MaxLon)
+				.Select(t => new Element
+				{
+					Id = t.Id,
+					ElementId = t.ElementId,
+					Lat = t.Lat,
+					Lon = t.Lon,
+					Type = t.Type,
+					Tags = t.Tags
+				})
+				.ToListAsync();
+
+			_logger.LogInformation("{Count} Toiletten in {City} ({DisplayName}) gefunden", 
+				toilets.Count, city, bbox.DisplayName);
+
+			var result = new KloModel
+			{
+				Elements = toilets
+			};
+
+			// Cache für 7 Tage
+			_cache.Set(cacheKey, result, TimeSpan.FromDays(7));
+			_logger.LogInformation("Ergebnis für {City} gecacht", city);
 
 			return result;
 		}
 
-		private async Task UpdateCacheInBackground(string query, string cacheKey, string timestampKey)
+		public async Task<KloModel> GetToilets(ToiletQueryBuilder queryBuilder)
 		{
-			try
-			{
-				Console.WriteLine($"Background-Update gestartet für {cacheKey}");
-				var freshData = await ExecuteQuery(query);
-				SetCacheWithTimestamp(cacheKey, timestampKey, freshData);
-				Console.WriteLine($"Background-Update abgeschlossen für {cacheKey}");
-			}
-			catch (Exception ex)
-			{
-				Console.WriteLine($"Background-Update fehlgeschlagen: {ex.Message}");
-			}
+			var query = queryBuilder.Build();
+			var city = ExtractCityFromQuery(query);
+			_logger.LogInformation("GetToilets (via QueryBuilder) - extrahierte Stadt: '{City}'", city);
+			return await GetToiletsByCity(city);
 		}
 
-		private void SetCacheWithTimestamp<T>(string cacheKey, string timestampKey, T value)
+		private string ExtractCityFromQuery(string query)
 		{
-			var cacheOptions = new MemoryCacheEntryOptions()
-				.SetAbsoluteExpiration(CacheDuration)
-				.SetPriority(CacheItemPriority.High);
-
-			_cache.Set(cacheKey, value, cacheOptions);
-			_cache.Set(timestampKey, DateTime.UtcNow, cacheOptions);
-		}
-
-		private string GetQueryHash(string query)
-		{
-			using var sha256 = System.Security.Cryptography.SHA256.Create();
-			var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(query));
-			return Convert.ToHexString(hashBytes)[..16];
-		}
-
-		private async Task<KloModel> ExecuteQuery(string query)
-		{
-			var url = $"https://overpass-api.de/api/interpreter?data={Uri.EscapeDataString(query)}";
-
-			try
+			var patterns = new[]
 			{
-				var request = new HttpRequestMessage(HttpMethod.Get, url);
-				request.Headers.Add("Accept", "application/json");
-				request.Headers.Add("User-Agent", "WaterDrop/1.0");
+				@"area\[""name""\]\s*=\s*""([^""]+)""",
+				@"area\[name\]\s*=\s*""([^""]+)""",
+				@"""name""\s*=\s*""([^""]+)""",
+			};
 
-				var response = await _httpClient.SendAsync(request);
-				response.EnsureSuccessStatusCode();
-				var json = await response.Content.ReadAsStringAsync();
+			foreach (var pattern in patterns)
+			{
+				var match = System.Text.RegularExpressions.Regex.Match(
+					query, 
+					pattern,
+					System.Text.RegularExpressions.RegexOptions.IgnoreCase
+				);
 
-				var result = JsonConvert.DeserializeObject<KloModel>(json);
-
-				if (result != null && result.Elements == null)
+				if (match.Success)
 				{
-					result.Elements = new List<Element>();
+					var city = match.Groups[1].Value;
+					_logger.LogInformation("Stadt extrahiert (Pattern: {Pattern}): '{City}'", pattern, city);
+					return city;
 				}
-
-				return result;
 			}
-			catch (HttpRequestException httpEx)
-			{
-				Console.WriteLine($"HTTP Error fetching toilets: {httpEx.Message}");
-				return new KloModel { Elements = new List<Element>() };
-			}
-			catch (JsonException jsonEx)
-			{
-				Console.WriteLine($"JSON Deserialization Error: {jsonEx.Message}");
-				return new KloModel { Elements = new List<Element>() };
-			}
-			catch (Exception ex)
-			{
-				Console.WriteLine($"Error fetching toilets: {ex.Message}");
-				return new KloModel { Elements = new List<Element>() };
-			}
+			
+			_logger.LogWarning("Keine Stadt im Query gefunden - nutze Default 'Hamburg'");
+			return "Hamburg";
 		}
-
-		public async Task AddKloCommentToData(DatabaseKloModel klomodel)
+		
+		public async Task<DatabaseKloModel?> GetKloByElementId(long elementId)
 		{
-			// Stempel den Erstellungszeitpunkt, falls der Aufrufer ihn nicht
-			// gesetzt hat. So bekommt jeder neue Review automatisch ein
-			// CreatedAt, ohne dass jede UI-Stelle das selbst tun muss.
-			klomodel.CreatedAt ??= DateTime.UtcNow;
-			_context.DatabaseKloModel.Add(klomodel);
-			await _context.SaveChangesAsync();
-			InvalidateDbCache();
-		}
-
-		/// <summary>
-		/// Stale-While-Revalidate für DB-Daten
-		/// </summary>
-		public async Task<List<DatabaseKloModel>> GetAllKloData()
-		{
-			// Versuche aus Cache zu laden
-			if (_cache.TryGetValue<List<DatabaseKloModel>>(DbCacheKey, out var cachedData))
-			{
-				Console.WriteLine("DB Cache HIT");
-				
-				// Prüfe ob Update im Hintergrund nötig ist
-				if (_cache.TryGetValue<DateTime>(DbCacheTimestampKey, out var lastUpdate))
-				{
-					var age = DateTime.UtcNow - lastUpdate;
-					if (age > RefreshThreshold)
-					{
-						Console.WriteLine($"DB Cache ist {age.TotalMinutes:F0} Min alt - starte Background-Update");
-						_ = Task.Run(async () => await UpdateDbCacheInBackground());
-					}
-				}
-
-				return cachedData;
-			}
-
-			Console.WriteLine("DB Cache MISS - Lade von Datenbank");
-			var data = await _context.DatabaseKloModel.ToListAsync();
-			SetDbCache(data);
-
-			return data;
-		}
-
-		private async Task UpdateDbCacheInBackground()
-		{
-			try
-			{
-				Console.WriteLine("DB Background-Update gestartet");
-				var freshData = await _context.DatabaseKloModel.ToListAsync();
-				SetDbCache(freshData);
-				Console.WriteLine("DB Background-Update abgeschlossen");
-			}
-			catch (Exception ex)
-			{
-				Console.WriteLine($"DB Background-Update fehlgeschlagen: {ex.Message}");
-			}
-		}
-
-		private void SetDbCache(List<DatabaseKloModel> data)
-		{
-			var cacheOptions = new MemoryCacheEntryOptions()
-				.SetAbsoluteExpiration(CacheDuration)
-				.SetPriority(CacheItemPriority.High);
-
-			_cache.Set(DbCacheKey, data, cacheOptions);
-			_cache.Set(DbCacheTimestampKey, DateTime.UtcNow, cacheOptions);
-		}
-
-		/// <summary>
-		/// Gibt für jede ElementId genau den NEUESTEN Review zurück.
-		/// Mehrere Reviews pro Ort sind nun ausdrücklich erlaubt — diese Methode
-		/// dient nur der Karten-/Popup-Ansicht, wo nur der jüngste Eintrag gezeigt wird.
-		/// Für die vollständige Historie pro Ort: <see cref="GetAllKlosByElementId"/>.
-		/// </summary>
-		public async Task<Dictionary<long, DatabaseKloModel>> GetAllKloDataAsDictionary()
-		{
-			var allData = await GetAllKloData();
-
-			// Sortierung: zuerst nach CreatedAt (neueste zuerst). Legacy-Zeilen ohne
-			// CreatedAt bekommen DateTime.MinValue zugewiesen und landen damit unten.
-			// Id dient als deterministischer Tiebreaker, falls zwei Reviews exakt
-			// dieselbe Zeit haben (sehr unwahrscheinlich, aber stabil ist besser).
-			var dictionary = allData
-				.GroupBy(k => k.ElementId)
-				.Select(g => g
-					.OrderByDescending(k => k.CreatedAt ?? DateTime.MinValue)
-					.ThenByDescending(k => k.Id)
-					.First())
-				.ToDictionary(k => k.ElementId, k => k);
-
-			return dictionary;
+			return await _context.DatabaseKloModel
+				.FirstOrDefaultAsync(k => k.ElementId == elementId);
 		}
 
 		public async Task<List<DatabaseKloModel>> GetKlosByElementIds(long[] elementIds)
 		{
-			if (elementIds == null || elementIds.Length == 0)
-				return new List<DatabaseKloModel>();
-
-			var dictionary = await GetAllKloDataAsDictionary();
-			
-			var results = elementIds
-				.Where(id => dictionary.ContainsKey(id))
-				.Select(id => dictionary[id])
-				.ToList();
-
-			Console.WriteLine($"GetKlosByElementIds: {results.Count}/{elementIds.Length} Reviews gefunden");
-			return results;
+			return await _context.DatabaseKloModel
+				.Where(k => elementIds.Contains(k.ElementId))
+				.ToListAsync();
 		}
 
-		public async Task<DatabaseKloModel> GetKloByElementId(long elementId)
+		public async Task AddKloCommentToData(DatabaseKloModel klo)
 		{
-			var dictionary = await GetAllKloDataAsDictionary();
-			return dictionary.TryGetValue(elementId, out var klo) ? klo : null;
-		}
-
-		/// <summary>
-		/// Gibt ALLE Reviews für einen Ort (ElementId) zurück, sortiert nach
-		/// Erstellungszeitpunkt absteigend (neuester zuerst). Wird vom
-		/// "Mehr Reviews"-Panel verwendet, um die Historie pro Toilette/
-		/// Wasserstelle anzuzeigen.
-		/// </summary>
-		public async Task<List<DatabaseKloModel>> GetAllKlosByElementId(long elementId)
-		{
-			var allData = await GetAllKloData();
-
-			return allData
-				.Where(k => k.ElementId == elementId)
-				.OrderByDescending(k => k.CreatedAt ?? DateTime.MinValue)
-				.ThenByDescending(k => k.Id)
-				.ToList();
-		}
-
-		public async Task DeleteKloDataComment(Guid? kloId)
-		{
-			if (kloId == null)
-			{
-				throw new ArgumentNullException(nameof(kloId));
-			}
-
-			var klo = await _context.DatabaseKloModel.FindAsync(kloId);
-
-			if (klo == null)
-			{
-				return;
-			}
-
-			_context.DatabaseKloModel.Remove(klo);
+			_context.DatabaseKloModel.Add(klo);
 			await _context.SaveChangesAsync();
-			InvalidateDbCache();
 		}
 
-		public async Task UpdateCommentData(DatabaseKloModel kloModel)
+		public async Task UpdateCommentData(DatabaseKloModel klo)
 		{
-			_context.DatabaseKloModel.Update(kloModel);
+			_context.DatabaseKloModel.Update(klo);
 			await _context.SaveChangesAsync();
-			InvalidateDbCache();
-		}
-
-		public async Task<DatabaseKloModel?> GetOneKloData(Guid kloId)
-		{
-			return await _context.DatabaseKloModel.FirstOrDefaultAsync(k => k.Id == kloId);
-		}
-
-		// HINWEIS: Die frühere Methode `RemoveDuplicateElementIds` wurde entfernt.
-		// Mehrere Reviews pro ElementId sind nun ein gewolltes Feature ("Mehr Reviews"-
-		// Panel zeigt die Historie). Duplikate dürfen nicht automatisch gelöscht werden.
-
-		private void InvalidateDbCache()
-		{
-			_cache.Remove(DbCacheKey);
-			_cache.Remove(DbCacheTimestampKey);
-			Console.WriteLine("DB Cache invalidiert");
-		}
-
-		public void ClearAllCaches()
-		{
-			InvalidateDbCache();
-			Console.WriteLine("Alle Caches gelöscht");
-		}
-
-		/// <summary>
-		/// Manuelle Cache-Aktualisierung erzwingen (z.B. für Admin-Button)
-		/// </summary>
-		public async Task ForceRefreshCache(ToiletQueryBuilder queryBuilder)
-		{
-			var query = queryBuilder.Build();
-			var cacheKey = $"toilets_{GetQueryHash(query)}";
-			var timestampKey = $"{cacheKey}_timestamp";
-
-			Console.WriteLine($"🔄 Force Refresh gestartet für {cacheKey}");
-			var freshData = await ExecuteQuery(query);
-			SetCacheWithTimestamp(cacheKey, timestampKey, freshData);
-			Console.WriteLine($"✅ Force Refresh abgeschlossen");
 		}
 	}
 }

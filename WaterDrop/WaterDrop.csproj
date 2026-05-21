@@ -18,7 +18,10 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.3" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.7" />
+    <PackageReference Include="NetTopologySuite" Version="2.6.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="OsmSharp" Version="6.2.0" />
+    <PackageReference Include="OsmSharp.Geo" Version="6.2.0" />
   </ItemGroup>
 
 </Project>
