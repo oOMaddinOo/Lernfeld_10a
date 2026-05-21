@@ -234,6 +234,112 @@ namespace WaterDropTests.UnitTests
 			_mockGeocodingService.Verify(x => x.GetCityBoundingBoxAsync(city), Times.Once); // Nur einmal aufgerufen
 		}
 
+		// ===== Tests für die neue "Mehrere Reviews pro Ort"-Logik =====
+
+		[Fact]
+		public async Task AddKloCommentToData_WhenCreatedAtNotSet_ShouldStampUtcNow()
+		{
+			// Arrange
+			var kloModel = CreateTestKloModel("Stempel-Test", 700001);
+			Assert.Null(kloModel.CreatedAt); // sicherstellen, dass kein Vorwert da ist
+
+			var beforeInsert = DateTime.UtcNow.AddSeconds(-1);
+
+			// Act
+			await _service.AddKloCommentToData(kloModel);
+
+			// Assert
+			var afterInsert = DateTime.UtcNow.AddSeconds(1);
+			var saved = await _context.DatabaseKloModel.FindAsync(kloModel.Id);
+			Assert.NotNull(saved);
+			Assert.NotNull(saved.CreatedAt);
+			Assert.InRange(saved.CreatedAt!.Value, beforeInsert, afterInsert);
+		}
+
+		[Fact]
+		public async Task AddKloCommentToData_WhenCreatedAtAlreadySet_ShouldNotOverwrite()
+		{
+			// Arrange
+			var fixedTime = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+			var kloModel = CreateTestKloModel("Vorgegebenes Datum", 700002);
+			kloModel.CreatedAt = fixedTime;
+
+			// Act
+			await _service.AddKloCommentToData(kloModel);
+
+			// Assert
+			var saved = await _context.DatabaseKloModel.FindAsync(kloModel.Id);
+			Assert.Equal(fixedTime, saved!.CreatedAt);
+		}
+
+		[Fact]
+		public async Task GetKloByElementId_WithMultipleReviews_ShouldReturnLatestByCreatedAt()
+		{
+			// Arrange — drei Reviews für denselben Ort, mit aufsteigenden Zeitstempeln
+			var elementId = 700003L;
+			var older = CreateTestKloModel("Alt", elementId);
+			older.CreatedAt = new DateTime(2026, 1, 1, 10, 0, 0, DateTimeKind.Utc);
+
+			var middle = CreateTestKloModel("Mittel", elementId);
+			middle.CreatedAt = new DateTime(2026, 1, 1, 11, 0, 0, DateTimeKind.Utc);
+
+			var newest = CreateTestKloModel("Neu", elementId);
+			newest.CreatedAt = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+
+			// In zufälliger Reihenfolge einfügen, damit Ordering wirklich getestet wird
+			await _service.AddKloCommentToData(middle);
+			await _service.AddKloCommentToData(newest);
+			await _service.AddKloCommentToData(older);
+
+			// Act
+			var result = await _service.GetKloByElementId(elementId);
+
+			// Assert
+			Assert.NotNull(result);
+			Assert.Equal("Neu", result.Comment);
+		}
+
+		[Fact]
+		public async Task GetAllKlosByElementId_ShouldReturnAllReviews_OrderedByCreatedAtDesc()
+		{
+			// Arrange
+			var elementId = 700004L;
+			var r1 = CreateTestKloModel("Erster", elementId);
+			r1.CreatedAt = new DateTime(2026, 2, 1, 9, 0, 0, DateTimeKind.Utc);
+			var r2 = CreateTestKloModel("Zweiter", elementId);
+			r2.CreatedAt = new DateTime(2026, 2, 1, 10, 0, 0, DateTimeKind.Utc);
+			var r3 = CreateTestKloModel("Dritter", elementId);
+			r3.CreatedAt = new DateTime(2026, 2, 1, 11, 0, 0, DateTimeKind.Utc);
+
+			// Ein Review für einen ANDEREN Ort — der darf nicht mit zurückkommen
+			var otherPlace = CreateTestKloModel("Anderer Ort", 700005L);
+
+			await _service.AddKloCommentToData(r1);
+			await _service.AddKloCommentToData(r3);
+			await _service.AddKloCommentToData(r2);
+			await _service.AddKloCommentToData(otherPlace);
+
+			// Act
+			var result = await _service.GetAllKlosByElementId(elementId);
+
+			// Assert
+			Assert.Equal(3, result.Count);
+			Assert.Equal("Dritter", result[0].Comment);  // neueste zuerst
+			Assert.Equal("Zweiter", result[1].Comment);
+			Assert.Equal("Erster",  result[2].Comment);
+		}
+
+		[Fact]
+		public async Task GetAllKlosByElementId_WhenNoReviewsExist_ShouldReturnEmptyList()
+		{
+			// Act
+			var result = await _service.GetAllKlosByElementId(999999L);
+
+			// Assert
+			Assert.NotNull(result);
+			Assert.Empty(result);
+		}
+
 		private DatabaseKloModel CreateTestKloModel(string comment, long elementId)
 		{
 			return new DatabaseKloModel

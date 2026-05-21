@@ -134,10 +134,84 @@
             <textarea class="wd-review-textarea"
                       @bind="reviewText"
                       placeholder="Write your review here..."></textarea>
+
+            <label class="wd-review-label">Foto (optional)</label>
+            @if (!string.IsNullOrEmpty(pendingPictureUrl))
+            {
+                <div class="wd-review-image-preview">
+                    <img src="@pendingPictureUrl" alt="Preview" />
+                    <button type="button" class="wd-review-image-swap" @onclick="SwapImage">
+                        🔄 Anderes Bild wählen
+                    </button>
+                </div>
+            }
+            else
+            {
+                <InputFile OnChange="HandleImageUpload"
+                           accept="image/jpeg,image/png,image/webp"
+                           class="wd-review-file-input" />
+                @if (uploadingImage)
+                {
+                    <div class="wd-review-uploading">Bild wird hochgeladen…</div>
+                }
+                @if (!string.IsNullOrEmpty(uploadErrorMessage))
+                {
+                    <div class="wd-review-error">@uploadErrorMessage</div>
+                }
+            }
+
             <button class="wd-review-save-btn" @onclick="SaveReview">Send Review</button>
+
+            <button class="wd-history-open-btn" @onclick="OpenHistoryPanel">
+                Mehr Reviews
+            </button>
+
             @if (!string.IsNullOrEmpty(reviewSaveMessage))
             {
                 <div class="wd-review-feedback">@reviewSaveMessage</div>
+            }
+        </div>
+    </div>
+}
+
+@if (historyPanelVisible)
+{
+    <div class="wd-history-panel open">
+        <div class="wd-history-header">
+            <div class="wd-history-title">Alle Reviews — @selectedFacilityName</div>
+            <button class="wd-history-close" @onclick="CloseHistoryPanel">&times;</button>
+        </div>
+        <div class="wd-history-body">
+            @if (loadingHistory)
+            {
+                <div class="wd-history-loading">Lade Reviews…</div>
+            }
+            else if (historyReviews == null || historyReviews.Count == 0)
+            {
+                <div class="wd-history-empty">
+                    Für diesen Ort gibt es noch keine Reviews.
+                </div>
+            }
+            else
+            {
+                @foreach (var review in historyReviews)
+                {
+                    <div class="wd-history-item">
+                        <div class="wd-history-item-date">
+                            @(review.CreatedAt.HasValue
+                                ? review.CreatedAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                                : "Datum unbekannt")
+                        </div>
+                        @if (!string.IsNullOrEmpty(review.Comment))
+                        {
+                            <div class="wd-history-item-comment">@review.Comment</div>
+                        }
+                        @if (!string.IsNullOrEmpty(review.PictureUrl))
+                        {
+                            <img class="wd-history-item-image" src="@review.PictureUrl" alt="Review picture" />
+                        }
+                    </div>
+                }
             }
         </div>
     </div>
@@ -358,17 +432,153 @@
     private string reviewText = string.Empty;
     private string reviewSaveMessage = string.Empty;
 
+    // Bild-Upload State
+    private string? pendingPictureUrl = null;       // URL des aktuell ausgewählten/hochgeladenen Bilds
+    private bool uploadingImage = false;            // true, während ein Upload läuft
+    private string? uploadErrorMessage = null;      // Fehlertext bei ungültiger Datei
+    private const long MaxImageSizeBytes = 5 * 1024 * 1024; // 5 MB
+
+    // History-Panel State ("Mehr Reviews"). Wird gefüllt, wenn der User
+    // im Haupt-Review-Panel auf "Mehr Reviews" klickt. Reine Ansicht — keine
+    // Edit/Delete-Aktionen für Endnutzer.
+    private bool historyPanelVisible = false;
+    private bool loadingHistory = false;
+    private List<DatabaseKloModel> historyReviews = new();
+
     [JSInvokable]
     public Task OnMarkerSelected(string elementIdStr, string facilityName)
     {
+        // Jeder Marker-Klick öffnet das Panel mit LEEREN Feldern.
+        // Nutzer können nur neue Reviews schreiben — bestehende Reviews werden
+        // nicht zum Bearbeiten vorgeladen (siehe "Mehr Reviews"-Panel zum Ansehen).
         selectedElementId = long.Parse(elementIdStr);
         selectedFacilityName = facilityName;
         reviewText = string.Empty;
+        pendingPictureUrl = null;
         reviewSaveMessage = string.Empty;
+        uploadingImage = false;
+        uploadErrorMessage = null;
         reviewPanelVisible = true;
         StateHasChanged();
         return Task.CompletedTask;
     }
+
+    private async Task HandleImageUpload(InputFileChangeEventArgs e)
+    {
+        uploadErrorMessage = null;
+        var file = e.File;
+        if (file == null) return;
+
+        // 1) Größe prüfen
+        if (file.Size > MaxImageSizeBytes)
+        {
+            uploadErrorMessage = $"Bild zu groß ({file.Size / 1024 / 1024} MB). Maximal 5 MB erlaubt.";
+            return;
+        }
+
+        // 2) Endung prüfen — wir akzeptieren nur Bildformate, die Browser zuverlässig anzeigen.
+        var ext = Path.GetExtension(file.Name).ToLowerInvariant();
+        var allowed = new[] { ".jpg", ".jpeg", ".png", ".webp" };
+        if (!allowed.Contains(ext))
+        {
+            uploadErrorMessage = "Nur JPG, PNG oder WebP erlaubt.";
+            return;
+        }
+
+        // 3) Datei speichern unter eindeutigem Namen, damit zwei Uploads sich nie überschreiben.
+        try
+        {
+            uploadingImage = true;
+            StateHasChanged();
+
+            var uploadsDir = Path.Combine(WebHostEnv.WebRootPath, "uploads");
+            Directory.CreateDirectory(uploadsDir); // sicherstellen, dass der Ordner existiert
+
+            var filename = $"{Guid.NewGuid()}{ext}";
+            var fullPath = Path.Combine(uploadsDir, filename);
+
+            await using (var outStream = File.Create(fullPath))
+            await using (var inStream = file.OpenReadStream(MaxImageSizeBytes))
+            {
+                await inStream.CopyToAsync(outStream);
+            }
+
+            // Relative URL, die der Browser über MapStaticAssets erreichen kann.
+            pendingPictureUrl = $"/uploads/{filename}";
+        }
+        catch (Exception ex)
+        {
+            uploadErrorMessage = $"Upload fehlgeschlagen: {ex.Message}";
+            Console.WriteLine($"Image upload error: {ex}");
+        }
+        finally
+        {
+            uploadingImage = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// "Anderes Bild wählen": verwirft das aktuell hochgeladene Bild aus dem Draft
+    /// und löscht die zugehörige Datei vom Server, weil der DB-Eintrag noch nicht
+    /// gespeichert wurde und die Datei sonst orphan bleiben würde.
+    /// </summary>
+    private void SwapImage()
+    {
+        if (!string.IsNullOrEmpty(pendingPictureUrl) &&
+            pendingPictureUrl.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var filename = Path.GetFileName(pendingPictureUrl);
+                var fullPath = Path.Combine(WebHostEnv.WebRootPath, "uploads", filename);
+                if (File.Exists(fullPath))
+                {
+                    File.Delete(fullPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Datei-Cleanup ist nicht kritisch — der UI-Flow soll weiterlaufen,
+                // auch wenn die alte Datei aus irgendeinem Grund nicht weg geht.
+                Console.WriteLine($"Could not delete uploaded image file: {ex.Message}");
+            }
+        }
+
+        pendingPictureUrl = null;
+        uploadErrorMessage = null;
+    }
+
+    // ===== History-Panel ("Mehr Reviews") =====
+
+    private async Task OpenHistoryPanel()
+    {
+        historyPanelVisible = true;
+        loadingHistory = true;
+        StateHasChanged();
+
+        try
+        {
+            historyReviews = await kloService.GetAllKlosByElementId(selectedElementId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load review history: {ex.Message}");
+            historyReviews = new List<DatabaseKloModel>();
+        }
+        finally
+        {
+            loadingHistory = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CloseHistoryPanel()
+    {
+        historyPanelVisible = false;
+        StateHasChanged();
+    }
+
 
     public record ReviewInfo(string? Comment, string? PictureUrl);
 
@@ -391,31 +601,37 @@
     {
         if (selectedElementId == 0) return;
 
+        // Wenn weder Kommentar noch Bild vorhanden sind, gibt es nichts zu speichern.
+        var hasContent = !string.IsNullOrWhiteSpace(reviewText) || !string.IsNullOrEmpty(pendingPictureUrl);
+        if (!hasContent)
+        {
+            reviewSaveMessage = "Bitte gib einen Kommentar oder ein Bild ein, bevor du sendest.";
+            StateHasChanged();
+            return;
+        }
+
         try
         {
-            var existing = await kloService.GetKloByElementId(selectedElementId);
-            if (existing != null)
+            // Immer einen NEUEN Eintrag anlegen — die Historie pro Ort bleibt
+            // dadurch erhalten. Nutzer können bestehende Reviews weder bearbeiten
+            // noch löschen; sie können nur eigene Reviews hinzufügen.
+            await kloService.AddKloCommentToData(new DatabaseKloModel
             {
-                existing.Comment = reviewText;
-                await kloService.UpdateCommentData(existing);
-            }
-            else
-            {
-                await kloService.AddKloCommentToData(new DatabaseKloModel
-                {
-                    Id = Guid.NewGuid(),
-                    ElementId = selectedElementId,
-                    Comment = reviewText,
-                    PictureUrl = null
-                });
-            }
+                Id = Guid.NewGuid(),
+                ElementId = selectedElementId,
+                Comment = reviewText,
+                PictureUrl = pendingPictureUrl
+                // CreatedAt wird in kloService.AddKloCommentToData automatisch gesetzt.
+            });
 
-            await JS.InvokeVoidAsync("updateMarkersWithReview", selectedElementId.ToString(), reviewText);
-            reviewSaveMessage = "Review sent successfully";
+            // Karten-Popup mit dem gerade eingefügten (= neuesten) Review aktualisieren.
+            await JS.InvokeVoidAsync("updateMarkersWithReviewAndPicture",
+                selectedElementId.ToString(), reviewText, pendingPictureUrl);
+            reviewSaveMessage = "Review erfolgreich gesendet.";
         }
         catch (Exception ex)
         {
-            reviewSaveMessage = $"Error sending review: {ex.Message}";
+            reviewSaveMessage = $"Fehler beim Senden: {ex.Message}";
             Console.WriteLine($"SaveReview error: {ex}");
         }
 
@@ -426,6 +642,9 @@
     {
         reviewPanelVisible = false;
         reviewSaveMessage = string.Empty;
+        pendingPictureUrl = null;
+        uploadingImage = false;
+        uploadErrorMessage = null;
         StateHasChanged();
     }
 
