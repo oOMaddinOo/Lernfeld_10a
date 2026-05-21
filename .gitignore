@@ -362,3 +362,8 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 /WaterDrop/appsettings.json
+
+# User-uploaded review images — den Ordner committen wir (via .gitkeep),
+# aber die hochgeladenen Bilder selbst gehören nicht ins Repo.
+/WaterDrop/wwwroot/uploads/*
+!/WaterDrop/wwwroot/uploads/.gitkeep

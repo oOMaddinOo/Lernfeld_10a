@@ -16,17 +16,19 @@ namespace WaterDrop
                 .AddInteractiveServerComponents();
 
             builder.Services.AddDbContext<ApplicationDbContext>(options => 
-            options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+                options.UseSqlServer(builder.Configuration.GetConnectionString("DatabaseConnection")));
 
             builder.Services.AddScoped<kloService>();
+			builder.Services.AddScoped<IGeocodingService, GeocodingService>();
 
-			var app = builder.Build();
+			builder.Services.AddMemoryCache();
+
+            var app = builder.Build();
 
             // Configure the HTTP request pipeline.
             if (!app.Environment.IsDevelopment())
             {
                 app.UseExceptionHandler("/Error");
-                // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
                 app.UseHsts();
             }
 
@@ -39,7 +41,7 @@ namespace WaterDrop
             app.MapRazorComponents<App>()
                 .AddInteractiveServerRenderMode();
 
-            app.Run();
+			app.Run();
         }
     }
 }

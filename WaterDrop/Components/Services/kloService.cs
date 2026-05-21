@@ -1,5 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
-using Newtonsoft.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using WaterDrop.Components.Data;
 using WaterDrop.Components.Models;
 
@@ -7,113 +8,175 @@ namespace WaterDrop.Components.Services
 {
 	public class kloService
 	{
-		private static readonly HttpClient _httpClient = new HttpClient();
-		private ApplicationDbContext _context;
+		private readonly ApplicationDbContext _context;
+		private readonly IMemoryCache _cache;
+		private readonly ILogger<kloService> _logger;
+		private readonly IGeocodingService _geocodingService;
 
-		public kloService(ApplicationDbContext context)
+		public kloService(
+			ApplicationDbContext context,
+			IMemoryCache cache,
+			ILogger<kloService> logger,
+			IGeocodingService geocodingService)
 		{
 			_context = context;
+			_cache = cache;
+			_logger = logger;
+			_geocodingService = geocodingService;
+		}
+
+		public async Task<KloModel> GetToiletsByCity(string city)
+		{
+			_logger.LogInformation("GetToiletsByCity aufgerufen mit: '{City}'", city);
+
+			if (string.IsNullOrWhiteSpace(city))
+			{
+				city = "Hamburg";
+				_logger.LogWarning("Keine Stadt angegeben - nutze Default: Hamburg");
+			}
+
+			var cacheKey = $"toilets_{city}";
+
+			_logger.LogInformation("Cache-Key: {CacheKey}", cacheKey);
+
+			if (_cache.TryGetValue<KloModel>(cacheKey, out var cachedResult))
+			{
+				_logger.LogInformation("Cache HIT für {City} - {Count} Toiletten", city, cachedResult.Elements.Count);
+				return cachedResult;
+			}
+
+			_logger.LogInformation("Cache MISS - lade Daten für {City}", city);
+
+			var bbox = await _geocodingService.GetCityBoundingBoxAsync(city);
+
+			if (bbox == null)
+			{
+				_logger.LogWarning("Keine Bounding Box für {City} gefunden - nutze Default (Hamburg)", city);
+				bbox = new BoundingBox
+				{
+					MinLat = 53.395,
+					MaxLat = 53.745,
+					MinLon = 9.731,
+					MaxLon = 10.325,
+					DisplayName = "Hamburg, Deutschland (Default)"
+				};
+			}
+
+			_logger.LogInformation("Bounding Box für {City}: {BBox}", city, bbox);
+
+			var toilets = await _context.Toilets
+				.Where(t => t.Lat >= bbox.MinLat && t.Lat <= bbox.MaxLat &&
+				            t.Lon >= bbox.MinLon && t.Lon <= bbox.MaxLon)
+				.Select(t => new Element
+				{
+					Id = t.Id,
+					ElementId = t.ElementId,
+					Lat = t.Lat,
+					Lon = t.Lon,
+					Type = t.Type,
+					Tags = t.Tags
+				})
+				.ToListAsync();
+
+			_logger.LogInformation("{Count} Toiletten in {City} ({DisplayName}) gefunden",
+				toilets.Count, city, bbox.DisplayName);
+
+			var result = new KloModel
+			{
+				Elements = toilets
+			};
+
+			_cache.Set(cacheKey, result, TimeSpan.FromDays(7));
+			_logger.LogInformation("Ergebnis für {City} gecacht", city);
+
+			return result;
 		}
 
 		public async Task<KloModel> GetToilets(ToiletQueryBuilder queryBuilder)
 		{
 			var query = queryBuilder.Build();
-			return await ExecuteQuery(query);
+			var city = ExtractCityFromQuery(query);
+			_logger.LogInformation("GetToilets (via QueryBuilder) - extrahierte Stadt: '{City}'", city);
+			return await GetToiletsByCity(city);
 		}
 
-		private async Task<KloModel> ExecuteQuery(string query)
+		private string ExtractCityFromQuery(string query)
 		{
-			var url = $"https://overpass-api.de/api/interpreter?data={Uri.EscapeDataString(query)}";
-
-			try
+			var patterns = new[]
 			{
-				var request = new HttpRequestMessage(HttpMethod.Get, url);
-				request.Headers.Add("Accept", "application/json");
-				request.Headers.Add("User-Agent", "WaterDrop/1.0");
+				@"area\[""name""\]\s*=\s*""([^""]+)""",
+				@"area\[name\]\s*=\s*""([^""]+)""",
+				@"""name""\s*=\s*""([^""]+)"""
+			};
 
-				var response = await _httpClient.SendAsync(request);
-				response.EnsureSuccessStatusCode();
-				var json = await response.Content.ReadAsStringAsync();
+			foreach (var pattern in patterns)
+			{
+				var match = System.Text.RegularExpressions.Regex.Match(
+					query,
+					pattern,
+					System.Text.RegularExpressions.RegexOptions.IgnoreCase
+				);
 
-				var result = JsonConvert.DeserializeObject<KloModel>(json);
-
-				if (result != null && result.Elements == null)
+				if (match.Success)
 				{
-					result.Elements = new List<Element>();
+					var city = match.Groups[1].Value;
+					_logger.LogInformation("Stadt extrahiert (Pattern: {Pattern}): '{City}'", pattern, city);
+					return city;
 				}
+			}
 
-				return result;
-			}
-			catch (HttpRequestException httpEx)
-			{
-				Console.WriteLine($"HTTP Error fetching toilets: {httpEx.Message}");
-				return new KloModel { Elements = new List<Element>() };
-			}
-			catch (JsonException jsonEx)
-			{
-				Console.WriteLine($"JSON Deserialization Error: {jsonEx.Message}");
-				return new KloModel { Elements = new List<Element>() };
-			}
-			catch (Exception ex)
-			{
-				Console.WriteLine($"Error fetching toilets: {ex.Message}");
-				return new KloModel { Elements = new List<Element>() };
-			}
+			_logger.LogWarning("Keine Stadt im Query gefunden - nutze Default 'Hamburg'");
+			return "Hamburg";
 		}
 
-
-		public async Task AddKloCommentToData(DatabaseKloModel klomodel)
-		{
-			_context.DatabaseKloModel.Add(klomodel);
-			await _context.SaveChangesAsync();
-		}
-
-		public async Task<List<DatabaseKloModel>> GetAllKloData()
-		{
-			return await _context.DatabaseKloModel.ToListAsync();
-		}
-
-		public async Task<DatabaseKloModel> GetKloByElementId(long elementId)
+		public async Task<DatabaseKloModel?> GetKloByElementId(long elementId)
 		{
 			return await _context.DatabaseKloModel
-		.Where(e => e.ElementId == elementId)
-		.FirstOrDefaultAsync();
+				.Where(k => k.ElementId == elementId)
+				.OrderByDescending(k => k.CreatedAt ?? DateTime.MinValue)
+				.ThenByDescending(k => k.Id)
+				.FirstOrDefaultAsync();
 		}
 
-		public async Task DeleteKloDataComment(Guid? kloId)
+		public async Task<List<DatabaseKloModel>> GetAllKlosByElementId(long elementId)
 		{
-			if (kloId == null)
-			{
-				throw new ArgumentNullException(nameof(kloId));
-			}
-
-			var klo = await _context.DatabaseKloModel.FindAsync(kloId);
-
-			if (klo == null)
-			{
-				return;
-			}
-
-			_context.DatabaseKloModel.Remove(klo);
-			await _context.SaveChangesAsync();
-		}
-
-		public async Task UpdateCommentData(DatabaseKloModel kloModel)
-		{
-			_context.DatabaseKloModel.Update(kloModel);
-			await _context.SaveChangesAsync();
-		}
-
-		public async Task<DatabaseKloModel?> GetOneKloData(Guid kloId)
-		{
-			return await _context.DatabaseKloModel.FirstOrDefaultAsync(k => k.Id == kloId);
+			return await _context.DatabaseKloModel
+				.Where(k => k.ElementId == elementId)
+				.OrderByDescending(k => k.CreatedAt ?? DateTime.MinValue)
+				.ThenByDescending(k => k.Id)
+				.ToListAsync();
 		}
 
 		public async Task<List<DatabaseKloModel>> GetKlosByElementIds(long[] elementIds)
 		{
-			return await _context.DatabaseKloModel
-				.Where(e => elementIds.Contains(e.ElementId))
+			if (elementIds.Length == 0)
+			{
+				return new List<DatabaseKloModel>();
+			}
+
+			var reviews = await _context.DatabaseKloModel
+				.Where(k => elementIds.Contains(k.ElementId))
+				.OrderByDescending(k => k.CreatedAt ?? DateTime.MinValue)
+				.ThenByDescending(k => k.Id)
 				.ToListAsync();
+
+			return reviews
+				.GroupBy(k => k.ElementId)
+				.Select(group => group.First())
+				.ToList();
+		}
+
+		public async Task AddKloCommentToData(DatabaseKloModel klo)
+		{
+			klo.CreatedAt ??= DateTime.UtcNow;
+			_context.DatabaseKloModel.Add(klo);
+			await _context.SaveChangesAsync();
+		}
+
+		public async Task UpdateCommentData(DatabaseKloModel klo)
+		{
+			_context.DatabaseKloModel.Update(klo);
+			await _context.SaveChangesAsync();
 		}
 	}
 }

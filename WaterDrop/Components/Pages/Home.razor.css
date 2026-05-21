@@ -524,3 +524,211 @@
         bottom: 0;
     }
 }
+
+/* ===== Review Panel: Bild-Upload ===== */
+.wd-review-file-input {
+    font-size: 12px;
+    color: #444;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+.wd-review-file-input::file-selector-button {
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: #1a1a1a;
+    cursor: pointer;
+    margin-right: 8px;
+}
+
+.wd-review-file-input::file-selector-button:hover {
+    background: #f5f5f5;
+}
+
+.wd-review-image-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 10px;
+    padding: 8px;
+    background: #fff;
+}
+
+.wd-review-image-preview img {
+    width: 100%;
+    max-height: 200px;
+    object-fit: cover;
+    border-radius: 6px;
+    display: block;
+}
+
+.wd-review-image-swap {
+    background: #fff;
+    color: #3461C1;
+    border: 1px solid rgba(52, 97, 193, 0.4);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-family: system-ui, -apple-system, sans-serif;
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+.wd-review-image-swap:hover {
+    background: rgba(52, 97, 193, 0.08);
+}
+
+.wd-review-uploading {
+    font-size: 12px;
+    color: #666;
+}
+
+.wd-review-error {
+    font-size: 12px;
+    color: #c55;
+}
+
+/* ===== "Mehr Reviews"-Button im Review-Panel ===== */
+.wd-history-open-btn {
+    background: #fff;
+    color: #3461C1;
+    border: 1px solid #3461C1;
+    border-radius: 10px;
+    padding: 8px 0;
+    font-size: 12px;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    width: 100%;
+    transition: background-color 0.15s;
+}
+
+.wd-history-open-btn:hover {
+    background: rgba(52, 97, 193, 0.06);
+}
+
+/* ===== History-Panel ("Mehr Reviews") ===== */
+.wd-history-panel {
+    position: fixed;
+    top: 0;
+    right: -380px;
+    width: 360px;
+    height: 100vh;
+    background: rgba(253, 250, 242, 0.98);
+    border-left: 0.5px solid rgba(0, 0, 0, 0.08);
+    z-index: 1200;   /* über dem Review-Panel (1100) */
+    display: flex;
+    flex-direction: column;
+    font-family: system-ui, -apple-system, sans-serif;
+    box-sizing: border-box;
+    transition: right 0.3s ease;
+}
+
+.wd-history-panel.open {
+    right: 0;
+}
+
+.wd-history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 16px 12px;
+    border-bottom: 0.5px solid rgba(0, 0, 0, 0.08);
+}
+
+.wd-history-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: #1a1a1a;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 280px;
+}
+
+.wd-history-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: #888;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.wd-history-close:hover {
+    color: #333;
+}
+
+.wd-history-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.wd-history-loading,
+.wd-history-empty {
+    font-size: 12px;
+    color: #888;
+    text-align: center;
+    padding: 24px 8px;
+}
+
+.wd-history-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 10px;
+}
+
+.wd-history-item-date {
+    font-size: 11px;
+    color: #888;
+    font-weight: 500;
+}
+
+.wd-history-item-comment {
+    font-size: 13px;
+    color: #1a1a1a;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.wd-history-item-image {
+    width: 100%;
+    max-height: 180px;
+    object-fit: cover;
+    border-radius: 6px;
+    display: block;
+}
+
+@media (max-width: 768px) {
+    .wd-history-panel {
+        top: auto;
+        right: 0;
+        bottom: -85vh;
+        width: 100%;
+        height: auto;
+        max-height: 80vh;
+        border-left: none;
+        border-top: 0.5px solid rgba(0, 0, 0, 0.08);
+        border-radius: 20px 20px 0 0;
+        transition: bottom 0.3s ease;
+    }
+
+    .wd-history-panel.open {
+        right: 0;
+        bottom: 0;
+    }
+}
