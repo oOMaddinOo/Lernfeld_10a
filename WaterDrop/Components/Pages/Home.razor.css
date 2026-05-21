@@ -194,6 +194,27 @@
     background: #2244a0;
 }
 
+/* "Frische Daten laden" — sekundärer Button direkt unter "Search this area".
+   Visuell zurückgenommen, weil es eine Power-User-Aktion ist (umgeht Cache). */
+.wd-refresh-btn {
+    width: 100%;
+    height: 32px;
+    background: transparent;
+    color: #3461C1;
+    border: 1px solid rgba(52, 97, 193, 0.4);
+    border-radius: 16px;
+    font-size: 12px;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    margin-top: 6px;
+    transition: background-color 0.15s;
+}
+
+.wd-refresh-btn:hover {
+    background: rgba(52, 97, 193, 0.06);
+}
+
 /* ===== FAB: Locate User ===== */
 .wd-locate-fab {
     position: fixed;
@@ -609,6 +630,42 @@
 
 .wd-history-open-btn:hover {
     background: rgba(52, 97, 193, 0.06);
+}
+
+/* ===== Geolocation Status Banner ===== */
+.wd-geo-status {
+    background: rgba(52, 97, 193, 0.08);
+    color: #3461C1;
+    border: 1px solid rgba(52, 97, 193, 0.18);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-family: system-ui, -apple-system, sans-serif;
+    text-align: center;
+}
+
+/* ===== Wegbeschreibungs-Button (Google Maps) ===== */
+.wd-directions-btn {
+    display: block;
+    text-align: center;
+    text-decoration: none;
+    background: #fff;
+    color: #5BA85A;
+    border: 1px solid #5BA85A;
+    border-radius: 10px;
+    padding: 8px 0;
+    font-size: 12px;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    width: 100%;
+    transition: background-color 0.15s;
+    box-sizing: border-box;
+}
+
+.wd-directions-btn:hover {
+    background: rgba(91, 168, 90, 0.08);
+    color: #4d8f4d;
 }
 
 /* ===== History-Panel ("Mehr Reviews") ===== */

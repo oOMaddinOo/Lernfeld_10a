@@ -43,22 +43,14 @@ function createTeardropIcon(color) {
     });
 }
 
-function buildOverpassQuery(category, city) {
-    const escaped = city.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    let tagFilter = '';
-    switch (category) {
-        case 'restrooms':       tagFilter = '[amenity=toilets]'; break;
-        case 'drinking_water':  tagFilter = '[amenity=drinking_water]'; break;
-        case 'accessible':      tagFilter = '[amenity=toilets][wheelchair=yes]'; break;
-        case 'changing_table':  tagFilter = '[amenity=toilets][changing_table=yes]'; break;
-    }
-    return `[out:json][timeout:25];area[name="${escaped}"]->.searchArea;(node${tagFilter}(area.searchArea);way${tagFilter}(area.searchArea););out body;>;out skel qt;`;
-}
-
-function buildCombinedOverpassQuery(city) {
-    const escaped = city.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    return `[out:json][timeout:25];area[name="${escaped}"][boundary=administrative]->.searchArea;(node[amenity=toilets](area.searchArea);way[amenity=toilets](area.searchArea);node[amenity=drinking_water](area.searchArea);way[amenity=drinking_water](area.searchArea););out center;`;
-}
+// HINWEIS: Die früheren Helfer buildOverpassQuery / buildCombinedOverpassQuery
+// und die Funktionen window.fetchAllCategories / window.fetchCategory wurden
+// entfernt. Toilettendaten werden jetzt vollständig aus der ToiletData-Tabelle
+// geladen — der Datenfluss ist:
+//     kloService.GetToiletsByCity (C#, liest aus DB)
+//   → JS addCategoryElements(elements, activeCategories)
+//   → Marker auf der Karte
+// Es gibt keinen direkten Overpass-Aufruf mehr im Frontend.
 
 function classifyElement(el) {
     const tags = el.tags || {};
@@ -72,88 +64,6 @@ function classifyElement(el) {
     }
     return categories;
 }
-
-window.fetchAllCategories = async function (city, activeCategories) {
-    if (!window.map) {
-        console.error('Map not initialized!');
-        return {};
-    }
-
-    window.markersByElementId = {};
-
-    for (const cat of activeCategories) {
-        if (window.categoryLayers[cat]) {
-            window.categoryLayers[cat].clearLayers();
-        }
-    }
-
-    const query = buildCombinedOverpassQuery(city);
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'data=' + encodeURIComponent(query)
-    });
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    const data = await response.json();
-    const elements = (data.elements || [])
-        .map(el => {
-            if (el.lat == null && el.center) { el.lat = el.center.lat; el.lon = el.center.lon; }
-            return el;
-        })
-        .filter(el => el.lat != null && el.lon != null);
-
-    const counts = {};
-    for (const cat of activeCategories) counts[cat] = 0;
-
-    let centered = false;
-    for (const el of elements) {
-        const cats = classifyElement(el).filter(c => activeCategories.includes(c));
-        if (cats.length === 0) continue;
-
-        const popup = buildPopupContent(el.tags || {});
-        for (const cat of cats) {
-            const icon = createTeardropIcon(window.categoryColors[cat]);
-            const marker = L.marker([el.lat, el.lon], { icon });
-            marker._basePopupContent = popup;
-            marker.bindPopup(popup).addTo(window.categoryLayers[cat]);
-            counts[cat] = (counts[cat] || 0) + 1;
-
-            if (!window.markersByElementId[el.id]) window.markersByElementId[el.id] = [];
-            window.markersByElementId[el.id].push(marker);
-
-            marker.on('click', function () {
-                const name = (el.tags && el.tags.name) ? el.tags.name : ('ID: ' + el.id);
-                if (window.dotNetRef) {
-                    window.dotNetRef.invokeMethodAsync('OnMarkerSelected', String(el.id), name);
-                }
-            });
-        }
-
-        if (!centered) {
-            window.map.setView([el.lat, el.lon], 13);
-            centered = true;
-        }
-    }
-
-    const elementIds = Object.keys(window.markersByElementId);
-    if (elementIds.length > 0 && window.dotNetRef) {
-        try {
-            const reviews = await window.dotNetRef.invokeMethodAsync('GetReviewsForElements', elementIds);
-            for (const [idStr, info] of Object.entries(reviews)) {
-                const markers = window.markersByElementId[idStr] || [];
-                for (const m of markers) {
-                    m.setPopupContent(buildPopupWithReviewAndPicture(m._basePopupContent, info.comment, info.pictureUrl));
-                }
-            }
-        } catch (e) {
-            console.warn('Could not load reviews:', e);
-        }
-    }
-
-    return counts;
-};
 
 function buildPopupContent(tags) {
     let html = '';
@@ -189,7 +99,12 @@ window.addCategoryElements = async function (elements, activeCategories) {
     const counts = {};
     for (const cat of activeCategories) counts[cat] = 0;
 
-    let centered = false;
+    // Wenn die Karte bereits auf den Standort des Nutzers zentriert ist
+    // (User-Marker wurde nach erfolgreicher Geolokation gesetzt), NICHT
+    // automatisch auf den ersten Toiletten-Marker umzentrieren — sonst
+    // springt die Ansicht vom Nutzer weg auf z. B. die Stadtmitte.
+    let centered = !!window.userLocationMarker;
+
     for (const el of elements) {
         const cats = classifyElement(el).filter(c => activeCategories.includes(c));
         if (cats.length === 0) continue;
@@ -208,7 +123,15 @@ window.addCategoryElements = async function (elements, activeCategories) {
             marker.on('click', function () {
                 const name = (el.tags && el.tags.name) ? el.tags.name : ('ID: ' + el.id);
                 if (window.dotNetRef) {
-                    window.dotNetRef.invokeMethodAsync('OnMarkerSelected', String(el.id), name);
+                    // Lat/Lon mitgeben, damit der Wegbeschreibungs-Button im
+                    // Review-Panel direkt zu Google Maps verlinken kann.
+                    window.dotNetRef.invokeMethodAsync(
+                        'OnMarkerSelected',
+                        String(el.id),
+                        name,
+                        el.lat,
+                        el.lon
+                    );
                 }
             });
         }
@@ -235,47 +158,6 @@ window.addCategoryElements = async function (elements, activeCategories) {
     }
 
     return counts;
-};
-
-window.fetchCategory = async function (category, city) {
-    if (!window.map) {
-        console.error('Map not initialized!');
-        return 0;
-    }
-
-    if (window.categoryLayers[category]) {
-        window.categoryLayers[category].clearLayers();
-    }
-
-    const query = buildOverpassQuery(category, city);
-    const icon = createTeardropIcon(window.categoryColors[category]);
-
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'data=' + encodeURIComponent(query)
-    });
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-    const data = await response.json();
-    const elements = (data.elements || []).filter(el => el.lat != null && el.lon != null);
-
-    let count = 0;
-    let centered = false;
-    for (const el of elements) {
-        const popup = buildPopupContent(el.tags || {});
-        L.marker([el.lat, el.lon], { icon })
-            .bindPopup(popup)
-            .addTo(window.categoryLayers[category]);
-        if (!centered) {
-            window.map.setView([el.lat, el.lon], 13);
-            centered = true;
-        }
-        count++;
-    }
-
-    return count;
 };
 
 window.clearCategoryLayer = function (category) {
@@ -307,12 +189,43 @@ window.centerMap = function (lat, lon, zoom = 13) {
     }
 };
 
+// "Du bist hier"-Marker: ein erkennbar anderer Stil als die Toiletten-Marker,
+// damit Nutzer sofort sehen, wo sie sich befinden. Wir merken uns die
+// Referenz auf window, damit wiederholte Aufrufe den alten Marker ersetzen
+// statt zu duplizieren.
+function setUserLocationMarker(lat, lon) {
+    if (!window.map) return;
+    if (window.userLocationMarker) {
+        try { window.map.removeLayer(window.userLocationMarker); } catch (e) { /* ignore */ }
+    }
+    const icon = L.divIcon({
+        html: `<div style="
+            width: 16px; height: 16px;
+            background: #1a73e8;
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.4), 0 2px 4px rgba(0,0,0,0.3);
+        "></div>`,
+        className: '',
+        iconSize: [16, 16],
+        iconAnchor: [8, 8]
+    });
+    window.userLocationMarker = L.marker([lat, lon], { icon, zIndexOffset: 1000 })
+        .bindPopup('📍 Du bist hier')
+        .addTo(window.map);
+}
+
 window.initMapWithGeolocate = function (dotNetRef) {
     window.dotNetRef = dotNetRef;
     window.initMap(51.0, 10.0);
     window.map.setZoom(6);
 
+    // Loading-Status an Blazor melden, damit das UI eine sichtbare Rückmeldung
+    // zeigt, während die Geolokation läuft (sonst sieht es einfach "tot" aus).
+    dotNetRef.invokeMethodAsync('SetGeolocationStatus', 'locating');
+
     if (!navigator.geolocation) {
+        dotNetRef.invokeMethodAsync('SetGeolocationStatus', 'unavailable');
         dotNetRef.invokeMethodAsync('SetCityAndSearch', 'Hamburg');
         return;
     }
@@ -322,6 +235,8 @@ window.initMapWithGeolocate = function (dotNetRef) {
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
             window.map.setView([lat, lon], 13);
+            setUserLocationMarker(lat, lon);
+            dotNetRef.invokeMethodAsync('SetGeolocationStatus', 'loading_toilets');
             try {
                 const resp = await fetch(
                     `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
@@ -338,6 +253,7 @@ window.initMapWithGeolocate = function (dotNetRef) {
         function (err) {
             console.warn('Geolocation failed:', err.message);
             window.map.setView([53.5801097, 9.8859876], 13);
+            dotNetRef.invokeMethodAsync('SetGeolocationStatus', 'denied');
             dotNetRef.invokeMethodAsync('SetCityAndSearch', 'Hamburg');
         },
         { timeout: 8000, maximumAge: 300000 }
@@ -347,7 +263,11 @@ window.initMapWithGeolocate = function (dotNetRef) {
 window.locateUser = function () {
     if (!navigator.geolocation || !window.map) return;
     navigator.geolocation.getCurrentPosition(function (pos) {
-        window.map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        window.map.setView([lat, lon], 15);
+        // Auch beim manuellen "Locate"-Klick den User-Marker aktualisieren.
+        setUserLocationMarker(lat, lon);
     });
 };
 
