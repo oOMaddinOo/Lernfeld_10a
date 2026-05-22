@@ -234,6 +234,72 @@ namespace WaterDropTests.UnitTests
 			_mockGeocodingService.Verify(x => x.GetCityBoundingBoxAsync(city), Times.Once); // Nur einmal aufgerufen
 		}
 
+		// ===== Regressionstest: drinking_water-Filter zeigt 0 =====
+		//
+		// Vorher hat `GetToiletsByCity` direkt projiziert
+		// (`.Select(t => new Element { Tags = t.Tags })`). Weil `Tags`
+		// `[NotMapped]` ist und der Getter intern `TagsJson` liest, konnte
+		// EF Core die TagsJson-Spalte aus dem SELECT wegoptimieren — dann
+		// kam Tags im Element leer zurück und das JS-Frontend fand keine
+		// amenity=drinking_water-Datensätze. Dieser Test stellt sicher,
+		// dass das Tags-Dictionary tatsächlich gefüllt durch die Service-
+		// Schicht durchkommt.
+		[Fact]
+		public async Task GetToiletsByCity_ShouldPreserveAmenityTagOnElements()
+		{
+			// Arrange
+			var city = "Hamburg";
+			var bbox = new BoundingBox
+			{
+				MinLat = 53.395, MaxLat = 53.745,
+				MinLon = 9.731,  MaxLon = 10.325,
+				DisplayName = "Hamburg, Deutschland"
+			};
+
+			_mockGeocodingService
+				.Setup(x => x.GetCityBoundingBoxAsync(city))
+				.ReturnsAsync(bbox);
+
+			// Eine Toilette + ein Trinkbrunnen, beide in Hamburg.
+			// Wichtig: Tags als Dictionary setzen — der ToiletData-Setter
+			// serialisiert das automatisch nach TagsJson (so wie der echte
+			// Seed in seed-drinking-water-hamburg.sql).
+			_context.Toilets.AddRange(
+				new ToiletData
+				{
+					Id = Guid.NewGuid(), ElementId = 10001,
+					Lat = 53.55, Lon = 10.0, Type = "node",
+					Tags = new Dictionary<string, string> { ["amenity"] = "toilets" }
+				},
+				new ToiletData
+				{
+					Id = Guid.NewGuid(), ElementId = 10002,
+					Lat = 53.60, Lon = 10.0, Type = "node",
+					Tags = new Dictionary<string, string>
+					{
+						["amenity"] = "drinking_water",
+						["name"]    = "Stadtpark Trinkbrunnen"
+					}
+				}
+			);
+			await _context.SaveChangesAsync();
+
+			// Act
+			var result = await _service.GetToiletsByCity(city);
+
+			// Assert — beide Datensätze sind da UND amenity ist erhalten
+			Assert.Equal(2, result.Elements.Count);
+
+			var toilet = result.Elements.Single(e => e.ElementId == 10001);
+			Assert.NotNull(toilet.Tags);
+			Assert.Equal("toilets", toilet.Tags["amenity"]);
+
+			var water = result.Elements.Single(e => e.ElementId == 10002);
+			Assert.NotNull(water.Tags);
+			Assert.Equal("drinking_water", water.Tags["amenity"]);
+			Assert.Equal("Stadtpark Trinkbrunnen", water.Tags["name"]);
+		}
+
 		// ===== Tests für die neue "Mehrere Reviews pro Ort"-Logik =====
 
 		[Fact]

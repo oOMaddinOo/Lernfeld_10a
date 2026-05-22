@@ -1,8 +1,11 @@
 @page "/"
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.AspNetCore.Hosting
 @using Microsoft.Extensions.Caching.Memory
 @inject IJSRuntime JS
 @inject kloService kloService
 @inject IMemoryCache Cache
+@inject IWebHostEnvironment WebHostEnv
 @implements IAsyncDisposable
 @rendermode InteractiveServer
 
@@ -27,6 +30,11 @@
                @onchange="@(e => cityInput = e.Value?.ToString() ?? "")"
                @onkeydown="@(async (KeyboardEventArgs e) => { if (e.Key == "Enter") await SearchAllActive(); })" />
     </div>
+
+    @if (GeolocationStatusText() is { } statusText)
+    {
+        <div class="wd-geo-status">@statusText</div>
+    }
 
     <div class="wd-filters-label">FILTERS</div>
 
@@ -62,6 +70,22 @@
     </div>
 
     <button class="wd-search-btn" @onclick="SearchAllActive">Search this area</button>
+    <button class="wd-refresh-btn" @onclick="RefreshCurrentCity"
+            title="Lädt frische Daten aus der Datenbank (umgeht den Cache)">
+        🔄 Frische Daten laden
+    </button>
+
+    @* Debug-Button: zählt direkt in der DB, ohne Cache und ohne Bounding-Box.
+       Damit lässt sich sofort sehen, ob der drinking_water-Seed in der DB ist,
+       die die App tatsächlich nutzt — ohne im Server-Log graben zu müssen. *@
+    <button class="wd-refresh-btn" @onclick="RunDebugStats"
+            title="Zeigt direkt aus der DB, wie viele drinking_water-Datensätze existieren">
+        🔍 DB-Statistik (Debug)
+    </button>
+    @if (!string.IsNullOrEmpty(debugStatsText))
+    {
+        <div class="wd-geo-status" style="white-space: pre-wrap; font-size:11px;">@debugStatsText</div>
+    }
 </aside>
 
 <div class="wd-mobile-topbar">
@@ -165,6 +189,16 @@
             <button class="wd-history-open-btn" @onclick="OpenHistoryPanel">
                 Mehr Reviews
             </button>
+
+            @if (selectedLat.HasValue && selectedLon.HasValue)
+            {
+                <a class="wd-directions-btn"
+                   href="@GetDirectionsUrl()"
+                   target="_blank"
+                   rel="noopener noreferrer">
+                    📍 Wegbeschreibung (Google Maps)
+                </a>
+            }
 
             @if (!string.IsNullOrEmpty(reviewSaveMessage))
             {
@@ -323,49 +357,41 @@
         {
             var elementDtos = new List<object>();
 
-            if (activeCats.Any(c => c is "restrooms" or "accessible" or "changing_table"))
+            // EIN einziger DB-Aufruf — `GetToiletsByCity` liefert alle Datensätze
+            // im Stadt-Bounding-Box (Toiletten UND Trinkbrunnen).
+            // Die Filterung nach Kategorie passiert clientseitig in `addCategoryElements`
+            // anhand des amenity-Tags. Vorher wurde dieselbe Query zweimal aufgerufen,
+            // was nur Duplikate erzeugte — und konnte zudem maskieren, ob drinking_water
+            // überhaupt im Result enthalten ist.
+            Console.WriteLine($"Lade alle Datensätze für Stadt: '{cityInput}'");
+
+            var fetchResult = await kloService.GetToiletsByCity(cityInput);
+
+            Console.WriteLine($"{fetchResult.Elements.Count} Datensätze erhalten (Toiletten + Trinkwasser zusammen)");
+
+            // Diagnose: zählen, wie viele davon drinking_water sind, BEVOR sie ans
+            // Frontend gehen. Wenn diese Zahl > 0 ist, aber das UI 0 anzeigt, liegt
+            // das Problem zwischen Blazor → JS → Marker. Wenn schon hier 0, sind
+            // die Seed-Daten nicht in der DB oder die Bounding-Box passt nicht.
+            int dwCountBeforeJs = 0;
+            foreach (var e in fetchResult.Elements)
             {
-                Console.WriteLine($"Lade Toiletten für Stadt: '{cityInput}'");
-                
-                var toiletResult = await kloService.GetToiletsByCity(cityInput);
-                
-                Console.WriteLine($"{toiletResult.Elements.Count} Toiletten erhalten");
-                
-                foreach (var e in toiletResult.Elements)
-                {
-                    var lat = e.Lat ?? e.Center?.Lat;
-                    var lon = e.Lon ?? e.Center?.Lon;
-                    if (lat.HasValue && lon.HasValue)
-                        elementDtos.Add(new { 
-                            id = e.ElementId.ToString(), 
-                            lat = lat.Value, 
-                            lon = lon.Value, 
-                            tags = e.Tags ?? new Dictionary<string, string>() 
-                        });
-                }
+                if (e.Tags != null && e.Tags.TryGetValue("amenity", out var a) && a == "drinking_water")
+                    dwCountBeforeJs++;
+
+                var lat = e.Lat ?? e.Center?.Lat;
+                var lon = e.Lon ?? e.Center?.Lon;
+                if (lat.HasValue && lon.HasValue)
+                    elementDtos.Add(new {
+                        id = e.ElementId.ToString(),
+                        lat = lat.Value,
+                        lon = lon.Value,
+                        tags = e.Tags ?? new Dictionary<string, string>()
+                    });
             }
 
-            if (activeCats.Contains("drinking_water"))
-            {
-                Console.WriteLine($"Lade Trinkwasser für Stadt: '{cityInput}'");
-
-                var waterResult = await kloService.GetToiletsByCity(cityInput);
-                
-                foreach (var e in waterResult.Elements)
-                {
-                    var lat = e.Lat ?? e.Center?.Lat;
-                    var lon = e.Lon ?? e.Center?.Lon;
-                    if (lat.HasValue && lon.HasValue)
-                        elementDtos.Add(new { 
-                            id = e.ElementId.ToString(), 
-                            lat = lat.Value, 
-                            lon = lon.Value, 
-                            tags = e.Tags ?? new Dictionary<string, string>() 
-                        });
-                }
-            }
-
-            Console.WriteLine($"Insgesamt {elementDtos.Count} Elemente gefunden");
+            Console.WriteLine($"Davon amenity=drinking_water: {dwCountBeforeJs} (vor JS-Übergabe)");
+            Console.WriteLine($"Insgesamt {elementDtos.Count} Elemente ans Frontend");
 
             var result = await JS.InvokeAsync<Dictionary<string, int>>("addCategoryElements", elementDtos, activeCats);
             foreach (var cat in activeCats)
@@ -429,6 +455,8 @@
     private bool reviewPanelVisible = false;
     private long selectedElementId = 0;
     private string selectedFacilityName = string.Empty;
+    private double? selectedLat = null;       // GPS-Koordinaten des angeklickten Markers,
+    private double? selectedLon = null;       // benötigt vom Wegbeschreibungs-Button.
     private string reviewText = string.Empty;
     private string reviewSaveMessage = string.Empty;
 
@@ -446,13 +474,15 @@
     private List<DatabaseKloModel> historyReviews = new();
 
     [JSInvokable]
-    public Task OnMarkerSelected(string elementIdStr, string facilityName)
+    public Task OnMarkerSelected(string elementIdStr, string facilityName, double? lat = null, double? lon = null)
     {
         // Jeder Marker-Klick öffnet das Panel mit LEEREN Feldern.
         // Nutzer können nur neue Reviews schreiben — bestehende Reviews werden
         // nicht zum Bearbeiten vorgeladen (siehe "Mehr Reviews"-Panel zum Ansehen).
         selectedElementId = long.Parse(elementIdStr);
         selectedFacilityName = facilityName;
+        selectedLat = lat;
+        selectedLon = lon;
         reviewText = string.Empty;
         pendingPictureUrl = null;
         reviewSaveMessage = string.Empty;
@@ -461,6 +491,19 @@
         reviewPanelVisible = true;
         StateHasChanged();
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Baut die Google-Maps-URL für eine Wegbeschreibung zum aktuell ausgewählten Marker.
+    /// Wichtig: InvariantCulture, damit Lat/Lon mit Punkt formatiert werden
+    /// (z. B. "53.5503" und NICHT "53,5503", was die URL kaputt machen würde).
+    /// </summary>
+    private string GetDirectionsUrl()
+    {
+        if (!selectedLat.HasValue || !selectedLon.HasValue) return "#";
+        var lat = selectedLat.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var lon = selectedLon.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return $"https://www.google.com/maps/dir/?api=1&destination={lat},{lon}";
     }
 
     private async Task HandleImageUpload(InputFileChangeEventArgs e)
@@ -654,7 +697,33 @@
         cityInput = city;
         StateHasChanged();
         await SearchAllActive();
+        // Sobald die Toiletten geladen sind, ist die Startsequenz abgeschlossen
+        // und der Status-Banner kann ausgeblendet werden.
+        geolocationStatus = null;
+        StateHasChanged();
     }
+
+    // Statusmeldung zur Startsequenz (Geolokation + erstes Laden). Wird vom
+    // JavaScript via SetGeolocationStatus gesetzt und in einem Banner angezeigt.
+    // Mögliche Werte: "locating", "loading_toilets", "denied", "unavailable", null.
+    private string? geolocationStatus = null;
+
+    [JSInvokable]
+    public Task SetGeolocationStatus(string status)
+    {
+        geolocationStatus = status;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private string? GeolocationStatusText() => geolocationStatus switch
+    {
+        "locating"        => "📍 Ermittle deinen Standort…",
+        "loading_toilets" => "🚻 Lade Toiletten in deiner Nähe…",
+        "denied"          => "📍 Standort nicht freigegeben — zeige Hamburg.",
+        "unavailable"     => "📍 Geolokation nicht verfügbar — zeige Hamburg.",
+        _                 => null
+    };
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -681,4 +750,52 @@
         }
         Console.WriteLine("Cache gelöscht!");
     }
+
+    /// <summary>
+    /// Manuelle Aktualisierung: löscht den Cache-Eintrag für die aktuell
+    /// angezeigte Stadt und lädt frische Daten aus der DB. Wird vom
+    /// "Frische Daten laden"-Button im Side-Panel aufgerufen.
+    ///
+    /// Hintergrund: kloService cached jede Stadt 7 Tage lang im Memory.
+    /// Wenn neue Toiletten / Trinkbrunnen in die DB geschrieben werden
+    /// (z. B. via SQL-Seed), tauchen sie erst nach Cache-Ablauf oder
+    /// einem Neustart auf — oder eben über diesen Button.
+    /// </summary>
+    private async Task RefreshCurrentCity()
+    {
+        if (string.IsNullOrWhiteSpace(cityInput)) return;
+
+        // Gleiche Normalisierung wie in SearchAllActive, damit wir den
+        // tatsächlich verwendeten Cache-Key treffen ("hamburg" → "Hamburg").
+        var city = cityInput.Trim();
+        city = char.ToUpper(city[0]) + city.Substring(1).ToLower();
+
+        Cache.Remove($"toilets_{city}");
+        Console.WriteLine($"Cache für '{city}' geleert — lade frische Daten.");
+
+        await SearchAllActive();
     }
+
+    // Debug-Anzeige für die DB-Statistik (siehe RunDebugStats unten).
+    private string debugStatsText = string.Empty;
+
+    /// <summary>
+    /// Liest direkt aus der Datenbank, wie viele drinking_water-Datensätze
+    /// es überhaupt gibt (gesamt + speziell in der Hamburg-Bounding-Box).
+    /// Antwort wird unter dem Button angezeigt — kein Server-Log nötig.
+    /// </summary>
+    private async Task RunDebugStats()
+    {
+        try
+        {
+            debugStatsText = "Lade DB-Statistik…";
+            StateHasChanged();
+            debugStatsText = await kloService.GetDebugStatsAsync();
+        }
+        catch (Exception ex)
+        {
+            debugStatsText = $"Fehler: {ex.Message}";
+        }
+        StateHasChanged();
+    }
+}
