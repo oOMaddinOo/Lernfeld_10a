@@ -69,6 +69,7 @@
 		}
 
 		query += @"(area.searchArea);
+                  way[""amenity""=""toilets""](area.searchArea);
                   relation[""amenity""=""toilets""](area.searchArea);
                 );
                 out center;";
