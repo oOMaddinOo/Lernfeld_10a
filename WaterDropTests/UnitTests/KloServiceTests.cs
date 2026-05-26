@@ -13,7 +13,6 @@ namespace WaterDropTests.UnitTests
 	{
 		private readonly ApplicationDbContext _context;
 		private readonly kloService _service;
-		private readonly IMemoryCache _cache;
 		private readonly Mock<ILogger<kloService>> _mockLogger;
 		private readonly Mock<IGeocodingService> _mockGeocodingService;
 
@@ -22,13 +21,12 @@ namespace WaterDropTests.UnitTests
 			var options = new DbContextOptionsBuilder<ApplicationDbContext>()
 				.UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
 				.Options;
-			
-			_cache = new MemoryCache(new MemoryCacheOptions());
+		
 			_mockLogger = new Mock<ILogger<kloService>>();
 			_mockGeocodingService = new Mock<IGeocodingService>();
 			
 			_context = new ApplicationDbContext(options);
-			_service = new kloService(_context, _cache, _mockLogger.Object, _mockGeocodingService.Object);
+			_service = new kloService(_context, _mockLogger.Object, _mockGeocodingService.Object);
 		}
 
 		[Fact]
@@ -203,35 +201,6 @@ namespace WaterDropTests.UnitTests
 			// Assert
 			Assert.NotNull(result);
 			_mockGeocodingService.Verify(x => x.GetCityBoundingBoxAsync("Hamburg"), Times.Once);
-		}
-
-		[Fact]
-		public async Task GetToiletsByCity_ShouldUseCacheOnSecondCall()
-		{
-			// Arrange
-			var city = "Berlin";
-			var bbox = new BoundingBox
-			{
-				MinLat = 52.338,
-				MaxLat = 52.676,
-				MinLon = 13.088,
-				MaxLon = 13.761,
-				DisplayName = "Berlin, Deutschland"
-			};
-
-			_mockGeocodingService
-				.Setup(x => x.GetCityBoundingBoxAsync(city))
-				.ReturnsAsync(bbox);
-
-			// Act
-			var result1 = await _service.GetToiletsByCity(city);
-			var result2 = await _service.GetToiletsByCity(city);
-
-			// Assert
-			Assert.NotNull(result1);
-			Assert.NotNull(result2);
-			Assert.Same(result1, result2); // Sollte dasselbe gecachte Objekt sein
-			_mockGeocodingService.Verify(x => x.GetCityBoundingBoxAsync(city), Times.Once); // Nur einmal aufgerufen
 		}
 
 		// ===== Regressionstest: drinking_water-Filter zeigt 0 =====
@@ -421,7 +390,6 @@ namespace WaterDropTests.UnitTests
 		{
 			_context.Database.EnsureDeleted();
 			_context.Dispose();
-			_cache.Dispose();
 		}
 	}
 }

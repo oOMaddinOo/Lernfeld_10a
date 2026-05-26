@@ -13,7 +13,6 @@ namespace WaterDropTests.IntegrationsTests
 	public class KloServiceIntegrationTests : IDisposable
 	{
 		private readonly ApplicationDbContext _context;
-		private readonly IMemoryCache _cache;
 		private readonly kloService _service;
 		private readonly Mock<ILogger<kloService>> _mockLogger;
 		private readonly Mock<IGeocodingService> _mockGeocodingService;
@@ -25,10 +24,9 @@ namespace WaterDropTests.IntegrationsTests
 				.Options;
 
 			_context = new ApplicationDbContext(options);
-			_cache = new MemoryCache(new MemoryCacheOptions());
 			_mockLogger = new Mock<ILogger<kloService>>();
 			_mockGeocodingService = new Mock<IGeocodingService>();
-			_service = new kloService(_context, _cache, _mockLogger.Object, _mockGeocodingService.Object);
+			_service = new kloService(_context, _mockLogger.Object, _mockGeocodingService.Object);
 		}
 
 		[Fact]
@@ -385,40 +383,6 @@ namespace WaterDropTests.IntegrationsTests
 		}
 
 		[Fact]
-		public async Task GetToiletsByCity_WithMultipleCalls_ShouldUseCaching()
-		{
-			// Arrange
-			var city = "Berlin";
-			var bbox = new BoundingBox
-			{
-				MinLat = 52.338,
-				MaxLat = 52.676,
-				MinLon = 13.088,
-				MaxLon = 13.761,
-				DisplayName = "Berlin, Deutschland"
-			};
-
-			_mockGeocodingService
-				.Setup(x => x.GetCityBoundingBoxAsync(city))
-				.ReturnsAsync(bbox);
-
-			_context.Toilets.Add(
-				new ToiletData { Id = Guid.NewGuid(), ElementId = 1, Lat = 52.5, Lon = 13.4, Type = "node", Tags = new() }
-			);
-			await _context.SaveChangesAsync();
-
-			// Act
-			var result1 = await _service.GetToiletsByCity(city);
-			var result2 = await _service.GetToiletsByCity(city);
-
-			// Assert
-			Assert.NotNull(result1);
-			Assert.NotNull(result2);
-			Assert.Same(result1, result2); // Sollte dasselbe gecachte Objekt sein
-			_mockGeocodingService.Verify(x => x.GetCityBoundingBoxAsync(city), Times.Once); // Nur einmal aufgerufen
-		}
-
-		[Fact]
 		public async Task GetToiletsByCity_WithDifferentCities_ShouldReturnDifferentResults()
 		{
 			// Arrange
@@ -568,7 +532,6 @@ namespace WaterDropTests.IntegrationsTests
 		public void Dispose()
 		{
 			_context?.Dispose();
-			(_cache as IDisposable)?.Dispose();
 		}
 	}
 }
