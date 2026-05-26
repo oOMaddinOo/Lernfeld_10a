@@ -80,6 +80,34 @@ namespace WaterDrop.Components.Services
 			return result;
 		}
 
+		public async Task<KloModel> GetToiletsByBbox(double minLat, double maxLat, double minLon, double maxLon)
+		{
+			var rawToilets = await _context.Toilets
+				.Where(t => t.Lat >= minLat && t.Lat <= maxLat &&
+							t.Lon >= minLon && t.Lon <= maxLon)
+				.AsNoTracking()
+				.ToListAsync();
+
+			var toilets = rawToilets
+				.Select(t => new Element
+				{
+					Id = t.Id,
+					ElementId = t.ElementId,
+					Lat = t.Lat,
+					Lon = t.Lon,
+					Type = t.Type,
+					Tags = t.Tags ?? new Dictionary<string, string>()
+				})
+				.ToList();
+
+			_logger.LogInformation("GetToiletsByBbox: {Count} Datensätze in [{MinLat},{MinLon}]→[{MaxLat},{MaxLon}]",
+				toilets.Count, minLat, minLon, maxLat, maxLon);
+
+			return new KloModel { Elements = toilets };
+		}
+
+
+
 		/// <summary>
 		/// Diagnose-Methode: zählt direkt aus der DB (kein Cache, kein
 		/// Bounding-Box-Filter), wie viele Datensätze welche amenity haben

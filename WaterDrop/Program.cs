@@ -20,6 +20,7 @@ namespace WaterDrop
 
 			builder.Services.AddScoped<kloService>();
 			builder.Services.AddScoped<IGeocodingService, GeocodingService>();
+			builder.Services.AddHostedService<DrinkingWaterSeeder>();
 
 			var app = builder.Build();
 
