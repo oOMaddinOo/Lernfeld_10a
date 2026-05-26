@@ -6,6 +6,7 @@
 @inject kloService kloService
 @inject IMemoryCache Cache
 @inject IWebHostEnvironment WebHostEnv
+@inject IGeocodingService GeocodingService
 @implements IAsyncDisposable
 @rendermode InteractiveServer
 
@@ -69,23 +70,26 @@
         }
     </div>
 
-    <button class="wd-search-btn" @onclick="SearchAllActive">Search this area</button>
-    <button class="wd-refresh-btn" @onclick="RefreshCurrentCity"
-            title="Lädt frische Daten aus der Datenbank (umgeht den Cache)">
-        🔄 Frische Daten laden
-    </button>
-
-    @* Debug-Button: zählt direkt in der DB, ohne Cache und ohne Bounding-Box.
-       Damit lässt sich sofort sehen, ob der drinking_water-Seed in der DB ist,
-       die die App tatsächlich nutzt — ohne im Server-Log graben zu müssen. *@
-    <button class="wd-refresh-btn" @onclick="RunDebugStats"
-            title="Zeigt direkt aus der DB, wie viele drinking_water-Datensätze existieren">
-        🔍 DB-Statistik (Debug)
-    </button>
-    @if (!string.IsNullOrEmpty(debugStatsText))
+    @if (nearbyFacilities.Count > 0)
     {
-        <div class="wd-geo-status" style="white-space: pre-wrap; font-size:11px;">@debugStatsText</div>
+        <div class="wd-filters-label">NEARBY</div>
+        <div class="wd-nearby-list">
+            @foreach (var fac in nearbyFacilities)
+            {
+                var facId = fac.Id;
+                var isDrinking = fac.Amenity == "drinking_water";
+                <button class="wd-nearby-item" @onclick="@(async () => await JS.InvokeVoidAsync("selectFacilityById", facId))">
+                    <span class="wd-nearby-dot" style="background:@(isDrinking ? "#4E9FD4" : "#3461C1");"></span>
+                    <span class="wd-nearby-info">
+                        <span class="wd-nearby-name">@fac.Name</span>
+                        <span class="wd-nearby-dist">@FormatDistance(fac.Distance)</span>
+                    </span>
+                </button>
+            }
+        </div>
     }
+
+    <button class="wd-search-btn" @onclick="SearchAllActive">Search this area</button>
 </aside>
 
 <div class="wd-mobile-topbar">
@@ -141,16 +145,95 @@
 
 <button class="wd-locate-fab" @onclick="LocateUser" title="My location">&#8982;</button>
 
+@if (showSearchAreaBtn)
+{
+    <button class="wd-search-area-pill" @onclick="SearchByMapBounds">Search this area</button>
+}
+
 @if (TotalCount > 0)
 {
     <div class="wd-total-badge">@TotalCount results</div>
 }
 
+@* ===== Facility Detail Card (info-first, like Google Maps) ===== *@
+@if (detailCardVisible)
+{
+    <div class="wd-detail-card">
+        <button class="wd-detail-close" @onclick="CloseDetailCard">&times;</button>
+
+        <div class="wd-detail-type">
+            <span class="wd-detail-type-dot" style="background:@selectedFacilityColor;"></span>
+            @selectedFacilityType
+        </div>
+
+        <div class="wd-detail-name">@selectedFacilityName</div>
+
+        @if (selectedDistance >= 0)
+        {
+            <div class="wd-detail-distance">@FormatDistance(selectedDistance) away</div>
+        }
+
+        @if (!string.IsNullOrEmpty(selectedAddress))
+        {
+            <div class="wd-detail-row">
+                <span class="wd-detail-row-icon">&#128205;</span>
+                <span>@selectedAddress</span>
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(selectedOpeningHours))
+        {
+            <div class="wd-detail-row">
+                <span class="wd-detail-row-icon">&#128336;</span>
+                <span>@selectedOpeningHours</span>
+            </div>
+        }
+
+        <div class="wd-detail-badges">
+            @if (selectedWheelchair == true)
+            {
+                <span class="wd-badge wd-badge-green">&#9855; Accessible</span>
+            }
+            @if (selectedFee == true)
+            {
+                <span class="wd-badge wd-badge-amber">Paid</span>
+            }
+            else if (selectedFee == false)
+            {
+                <span class="wd-badge wd-badge-green">Free</span>
+            }
+            @if (selectedReviewCount > 0)
+            {
+                <span class="wd-badge wd-badge-blue">@selectedReviewCount review@(selectedReviewCount != 1 ? "s" : "")</span>
+            }
+        </div>
+
+        <div class="wd-detail-actions">
+            @if (selectedLat.HasValue && selectedLon.HasValue)
+            {
+                <a class="wd-detail-action" href="@GetDirectionsUrl()" target="_blank" rel="noopener noreferrer">
+                    <span class="wd-detail-action-icon">&#128204;</span>
+                    <span>Directions</span>
+                </a>
+            }
+            <button class="wd-detail-action" @onclick="OpenReviewFromCard">
+                <span class="wd-detail-action-icon">&#9997;</span>
+                <span>Review</span>
+            </button>
+            <button class="wd-detail-action" @onclick="OpenHistoryPanel">
+                <span class="wd-detail-action-icon">&#128172;</span>
+                <span>@(selectedReviewCount > 0 ? $"All ({selectedReviewCount})" : "Reviews")</span>
+            </button>
+        </div>
+    </div>
+}
+
+@* ===== Review Panel (opens from detail card) ===== *@
 @if (reviewPanelVisible)
 {
     <div class="wd-review-panel open">
         <div class="wd-review-header">
-            <div class="wd-review-title">@selectedFacilityName</div>
+            <div class="wd-review-title">Review — @selectedFacilityName</div>
             <button class="wd-review-close" @onclick="CloseReviewPanel">&times;</button>
         </div>
         <div class="wd-review-body">
@@ -159,13 +242,13 @@
                       @bind="reviewText"
                       placeholder="Write your review here..."></textarea>
 
-            <label class="wd-review-label">Foto (optional)</label>
+            <label class="wd-review-label">Photo (optional)</label>
             @if (!string.IsNullOrEmpty(pendingPictureUrl))
             {
                 <div class="wd-review-image-preview">
                     <img src="@pendingPictureUrl" alt="Preview" />
                     <button type="button" class="wd-review-image-swap" @onclick="SwapImage">
-                        🔄 Anderes Bild wählen
+                        Change photo
                     </button>
                 </div>
             }
@@ -176,7 +259,7 @@
                            class="wd-review-file-input" />
                 @if (uploadingImage)
                 {
-                    <div class="wd-review-uploading">Bild wird hochgeladen…</div>
+                    <div class="wd-review-uploading">Uploading...</div>
                 }
                 @if (!string.IsNullOrEmpty(uploadErrorMessage))
                 {
@@ -185,20 +268,6 @@
             }
 
             <button class="wd-review-save-btn" @onclick="SaveReview">Send Review</button>
-
-            <button class="wd-history-open-btn" @onclick="OpenHistoryPanel">
-                Mehr Reviews
-            </button>
-
-            @if (selectedLat.HasValue && selectedLon.HasValue)
-            {
-                <a class="wd-directions-btn"
-                   href="@GetDirectionsUrl()"
-                   target="_blank"
-                   rel="noopener noreferrer">
-                    📍 Wegbeschreibung (Google Maps)
-                </a>
-            }
 
             @if (!string.IsNullOrEmpty(reviewSaveMessage))
             {
@@ -265,6 +334,7 @@
 
     private string cityInput = string.Empty;
     private bool bottomSheetVisible = false;
+    private bool showSearchAreaBtn = false;
     private DotNetObjectReference<Home>? dotNetRef;
 
     private Dictionary<string, bool> toggleStates = new()
@@ -300,6 +370,16 @@
     };
 
     private int TotalCount => counts.Values.Where(v => v >= 0).Sum();
+
+    // Nearby facilities list
+    private record NearbyFacility(string Id, string Name, double Lat, double Lon, double Distance, string Amenity);
+    private List<NearbyFacility> nearbyFacilities = new();
+
+    private string FormatDistance(double meters)
+    {
+        if (meters < 1000) return $"{(int)meters}m";
+        return $"{(meters / 1000):0.#}km";
+    }
 
     private void ToggleBottomSheet() => bottomSheetVisible = !bottomSheetVisible;
 
@@ -339,10 +419,13 @@
         cityInput = cityInput.Trim();
         cityInput = char.ToUpper(cityInput[0]) + cityInput.Substring(1).ToLower();
 
-        Console.WriteLine($"SearchAllActive aufgerufen mit cityInput: '{cityInput}'");
-
         foreach (var cat in categories.Select(c => c.Key))
             await JS.InvokeVoidAsync("clearCategoryLayer", cat);
+
+        // Fly the map to the searched city
+        var bbox = await GeocodingService.GetCityBoundingBoxAsync(cityInput);
+        if (bbox != null)
+            await JS.InvokeVoidAsync("fitMapToBounds", bbox.MinLat, bbox.MinLon, bbox.MaxLat, bbox.MaxLon);
 
         var activeCats = toggleStates.Where(kv => kv.Value).Select(kv => kv.Key).ToList();
 
@@ -351,6 +434,7 @@
             loadingStates[cat] = true;
             errorStates[cat] = "";
         }
+        showSearchAreaBtn = false;
         StateHasChanged();
 
         try
@@ -399,6 +483,8 @@
                 counts[cat] = result.TryGetValue(cat, out var c) ? c : 0;
                 loadingStates[cat] = false;
             }
+
+            await LoadNearbyList();
         }
         catch (Exception ex)
         {
@@ -408,6 +494,89 @@
                 loadingStates[cat] = false;
             }
             Console.WriteLine($"Error fetching categories: {ex.Message}");
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task LoadNearbyList()
+    {
+        try
+        {
+            var items = await JS.InvokeAsync<List<NearbyFacility>>("getNearbyFacilities", 8);
+            nearbyFacilities = items ?? new();
+        }
+        catch
+        {
+            nearbyFacilities = new();
+        }
+    }
+
+    [JSInvokable]
+    public Task ShowSearchAreaButton(bool show)
+    {
+        showSearchAreaBtn = show;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private record MapBounds(double MinLat, double MaxLat, double MinLon, double MaxLon);
+
+    private async Task SearchByMapBounds()
+    {
+        showSearchAreaBtn = false;
+        StateHasChanged();
+
+        var bounds = await JS.InvokeAsync<MapBounds>("getMapBounds");
+        if (bounds == null) return;
+
+        foreach (var cat in categories.Select(c => c.Key))
+            await JS.InvokeVoidAsync("clearCategoryLayer", cat);
+
+        var activeCats = toggleStates.Where(kv => kv.Value).Select(kv => kv.Key).ToList();
+        foreach (var cat in activeCats)
+        {
+            loadingStates[cat] = true;
+            errorStates[cat] = "";
+        }
+        StateHasChanged();
+
+        try
+        {
+            var fetchResult = await kloService.GetToiletsByBbox(
+                bounds.MinLat, bounds.MaxLat, bounds.MinLon, bounds.MaxLon);
+
+            var elementDtos = new List<object>();
+            foreach (var e in fetchResult.Elements)
+            {
+                var lat = e.Lat ?? e.Center?.Lat;
+                var lon = e.Lon ?? e.Center?.Lon;
+                if (lat.HasValue && lon.HasValue)
+                    elementDtos.Add(new {
+                        id = e.ElementId.ToString(),
+                        lat = lat.Value,
+                        lon = lon.Value,
+                        tags = e.Tags ?? new Dictionary<string, string>()
+                    });
+            }
+
+            var result = await JS.InvokeAsync<Dictionary<string, int>>("addCategoryElements", elementDtos, activeCats);
+            foreach (var cat in activeCats)
+            {
+                counts[cat] = result.TryGetValue(cat, out var c) ? c : 0;
+                loadingStates[cat] = false;
+            }
+
+            await LoadNearbyList();
+        }
+        catch (Exception ex)
+        {
+            foreach (var cat in activeCats)
+            {
+                errorStates[cat] = "Error loading";
+                loadingStates[cat] = false;
+            }
+            Console.WriteLine($"Error in SearchByMapBounds: {ex.Message}");
         }
 
         StateHasChanged();
@@ -452,45 +621,88 @@
         }
     }
 
-    private bool reviewPanelVisible = false;
+    // Detail card state — shown on marker click (info-first, like Google Maps)
+    private bool detailCardVisible = false;
     private long selectedElementId = 0;
     private string selectedFacilityName = string.Empty;
-    private double? selectedLat = null;       // GPS-Koordinaten des angeklickten Markers,
-    private double? selectedLon = null;       // benötigt vom Wegbeschreibungs-Button.
+    private double? selectedLat = null;
+    private double? selectedLon = null;
+    private string selectedFacilityType = string.Empty;   // "Restroom" or "Drinking Fountain"
+    private string selectedFacilityColor = "#3461C1";
+    private string? selectedAddress = null;
+    private string? selectedOpeningHours = null;
+    private bool? selectedWheelchair = null;
+    private bool? selectedFee = null;
+    private int selectedReviewCount = 0;
+    private double selectedDistance = -1; // meters, -1 = unknown
+
+    // Review panel state — opens from detail card "Write Review" button
+    private bool reviewPanelVisible = false;
     private string reviewText = string.Empty;
     private string reviewSaveMessage = string.Empty;
 
-    // Bild-Upload State
-    private string? pendingPictureUrl = null;       // URL des aktuell ausgewählten/hochgeladenen Bilds
-    private bool uploadingImage = false;            // true, während ein Upload läuft
-    private string? uploadErrorMessage = null;      // Fehlertext bei ungültiger Datei
+    // Image upload state
+    private string? pendingPictureUrl = null;
+    private bool uploadingImage = false;
+    private string? uploadErrorMessage = null;
     private const long MaxImageSizeBytes = 5 * 1024 * 1024; // 5 MB
 
-    // History-Panel State ("Mehr Reviews"). Wird gefüllt, wenn der User
-    // im Haupt-Review-Panel auf "Mehr Reviews" klickt. Reine Ansicht — keine
-    // Edit/Delete-Aktionen für Endnutzer.
+    // History panel state
     private bool historyPanelVisible = false;
     private bool loadingHistory = false;
     private List<DatabaseKloModel> historyReviews = new();
 
     [JSInvokable]
-    public Task OnMarkerSelected(string elementIdStr, string facilityName, double? lat = null, double? lon = null)
+    public async Task OnMarkerSelected(string elementIdStr, string facilityName, double? lat, double? lon, Dictionary<string, string>? tags)
     {
-        // Jeder Marker-Klick öffnet das Panel mit LEEREN Feldern.
-        // Nutzer können nur neue Reviews schreiben — bestehende Reviews werden
-        // nicht zum Bearbeiten vorgeladen (siehe "Mehr Reviews"-Panel zum Ansehen).
         selectedElementId = long.Parse(elementIdStr);
         selectedFacilityName = facilityName;
         selectedLat = lat;
         selectedLon = lon;
-        reviewText = string.Empty;
-        pendingPictureUrl = null;
-        reviewSaveMessage = string.Empty;
-        uploadingImage = false;
-        uploadErrorMessage = null;
-        reviewPanelVisible = true;
+
+        // Extract facility info from tags
+        tags ??= new Dictionary<string, string>();
+        var amenity = tags.GetValueOrDefault("amenity", "");
+        if (amenity == "drinking_water")
+        {
+            selectedFacilityType = "Drinking Fountain";
+            selectedFacilityColor = "#4E9FD4";
+        }
+        else
+        {
+            selectedFacilityType = "Public Restroom";
+            selectedFacilityColor = "#3461C1";
+        }
+
+        // Address
+        var parts = new List<string>();
+        if (tags.TryGetValue("addr:street", out var street))
+        {
+            var addr = street;
+            if (tags.TryGetValue("addr:housenumber", out var num)) addr += " " + num;
+            parts.Add(addr);
+        }
+        if (tags.TryGetValue("addr:city", out var addrCity)) parts.Add(addrCity);
+        selectedAddress = parts.Count > 0 ? string.Join(", ", parts) : null;
+
+        selectedOpeningHours = tags.GetValueOrDefault("opening_hours");
+        selectedWheelchair = tags.TryGetValue("wheelchair", out var wc) && wc == "yes" ? true : null;
+        selectedFee = tags.ContainsKey("fee") ? tags["fee"] == "yes" : null;
+
+        // Distance from user
+        if (lat.HasValue && lon.HasValue)
+            selectedDistance = await JS.InvokeAsync<double>("getDistanceFromUser", lat.Value, lon.Value);
+        else
+            selectedDistance = -1;
+
+        // Load review count
+        var reviews = await kloService.GetAllKlosByElementId(selectedElementId);
+        selectedReviewCount = reviews.Count;
+
+        // Close review panel if open, show detail card
+        reviewPanelVisible = false;
+        detailCardVisible = true;
         StateHasChanged();
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -681,7 +893,27 @@
         StateHasChanged();
     }
 
-    private void CloseReviewPanel()
+    private async Task CloseDetailCard()
+    {
+        detailCardVisible = false;
+        reviewPanelVisible = false;
+        historyPanelVisible = false;
+        await JS.InvokeVoidAsync("clearSelectedMarker");
+        StateHasChanged();
+    }
+
+    private void OpenReviewFromCard()
+    {
+        reviewText = string.Empty;
+        pendingPictureUrl = null;
+        reviewSaveMessage = string.Empty;
+        uploadingImage = false;
+        uploadErrorMessage = null;
+        reviewPanelVisible = true;
+        StateHasChanged();
+    }
+
+    private async Task CloseReviewPanel()
     {
         reviewPanelVisible = false;
         reviewSaveMessage = string.Empty;

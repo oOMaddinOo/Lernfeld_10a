@@ -36,9 +36,9 @@ namespace WaterDrop.Components.Services
 			}
 			
 			var cacheKey = $"toilets_{city}";
-			
+
 			_logger.LogInformation("Cache-Key: {CacheKey}", cacheKey);
-			
+
 			if (_cache.TryGetValue<KloModel>(cacheKey, out var cachedResult))
 			{
 				_logger.LogInformation("Cache HIT für {City} - {Count} Toiletten", city, cachedResult.Elements.Count);
@@ -230,6 +230,32 @@ namespace WaterDrop.Components.Services
 				$"drinking_water gesamt: {dwTotal}\n" +
 				$"drinking_water in Hamburg-BBox: {dwInHamburg}\n" +
 				$"Beispiel-IDs: [{string.Join(", ", sampleIds)}]";
+		}
+
+		public async Task<KloModel> GetToiletsByBbox(double minLat, double maxLat, double minLon, double maxLon)
+		{
+			var rawToilets = await _context.Toilets
+				.Where(t => t.Lat >= minLat && t.Lat <= maxLat &&
+				            t.Lon >= minLon && t.Lon <= maxLon)
+				.AsNoTracking()
+				.ToListAsync();
+
+			var toilets = rawToilets
+				.Select(t => new Element
+				{
+					Id = t.Id,
+					ElementId = t.ElementId,
+					Lat = t.Lat,
+					Lon = t.Lon,
+					Type = t.Type,
+					Tags = t.Tags ?? new Dictionary<string, string>()
+				})
+				.ToList();
+
+			_logger.LogInformation("GetToiletsByBbox: {Count} Datensätze in [{MinLat},{MinLon}]→[{MaxLat},{MaxLon}]",
+				toilets.Count, minLat, minLon, maxLat, maxLon);
+
+			return new KloModel { Elements = toilets };
 		}
 
 		public async Task<KloModel> GetToilets(ToiletQueryBuilder queryBuilder)
