@@ -15,6 +15,14 @@ namespace WaterDrop
             builder.Services.AddRazorComponents()
                 .AddInteractiveServerComponents();
 
+            // SignalR Konfiguration für Azure
+            builder.Services.AddSignalR(options =>
+            {
+                options.EnableDetailedErrors = true;
+                options.ClientTimeoutInterval = TimeSpan.FromSeconds(60);
+                options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+            });
+
             builder.Services.AddDbContext<ApplicationDbContext>(options => 
                 options.UseSqlServer(builder.Configuration.GetConnectionString("DatabaseConnection")));
 
@@ -34,6 +42,8 @@ namespace WaterDrop
 
             app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
             app.UseHttpsRedirection();
+
+            app.UseWebSockets();
 
             app.UseAntiforgery();
 
