@@ -1,11 +1,9 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Moq;
 using WaterDrop.Components.Data;
 using WaterDrop.Components.Models;
 using WaterDrop.Components.Services;
-using Xunit;
 
 namespace WaterDropTests.IntegrationsTests
 {
@@ -13,7 +11,6 @@ namespace WaterDropTests.IntegrationsTests
 	public class KloServiceIntegrationTests : IDisposable
 	{
 		private readonly ApplicationDbContext _context;
-		private readonly IMemoryCache _cache;
 		private readonly kloService _service;
 		private readonly Mock<ILogger<kloService>> _mockLogger;
 		private readonly Mock<IGeocodingService> _mockGeocodingService;
@@ -25,10 +22,9 @@ namespace WaterDropTests.IntegrationsTests
 				.Options;
 
 			_context = new ApplicationDbContext(options);
-			_cache = new MemoryCache(new MemoryCacheOptions());
 			_mockLogger = new Mock<ILogger<kloService>>();
 			_mockGeocodingService = new Mock<IGeocodingService>();
-			_service = new kloService(_context, _cache, _mockLogger.Object, _mockGeocodingService.Object);
+			_service = new kloService(_context, _mockLogger.Object, _mockGeocodingService.Object);
 		}
 
 		[Fact]
@@ -163,7 +159,7 @@ namespace WaterDropTests.IntegrationsTests
 			var klo1 = CreateTestKloModel("Klo 1", 777777);
 			var klo2 = CreateTestKloModel("Klo 2", 888888);
 			var klo3 = CreateTestKloModel("Klo 3", 999999);
-			
+
 			await _service.AddKloCommentToData(klo1);
 			await _service.AddKloCommentToData(klo2);
 			await _service.AddKloCommentToData(klo3);
@@ -197,7 +193,7 @@ namespace WaterDropTests.IntegrationsTests
 			var klo1 = CreateTestKloModel("Kommentar 1", 111111);
 			var klo2 = CreateTestKloModel("Kommentar 2", 222222);
 			var klo3 = CreateTestKloModel("Kommentar 3", 333333);
-			
+
 			await _service.AddKloCommentToData(klo1);
 			await _service.AddKloCommentToData(klo2);
 			await _service.AddKloCommentToData(klo3);
@@ -385,40 +381,6 @@ namespace WaterDropTests.IntegrationsTests
 		}
 
 		[Fact]
-		public async Task GetToiletsByCity_WithMultipleCalls_ShouldUseCaching()
-		{
-			// Arrange
-			var city = "Berlin";
-			var bbox = new BoundingBox
-			{
-				MinLat = 52.338,
-				MaxLat = 52.676,
-				MinLon = 13.088,
-				MaxLon = 13.761,
-				DisplayName = "Berlin, Deutschland"
-			};
-
-			_mockGeocodingService
-				.Setup(x => x.GetCityBoundingBoxAsync(city))
-				.ReturnsAsync(bbox);
-
-			_context.Toilets.Add(
-				new ToiletData { Id = Guid.NewGuid(), ElementId = 1, Lat = 52.5, Lon = 13.4, Type = "node", Tags = new() }
-			);
-			await _context.SaveChangesAsync();
-
-			// Act
-			var result1 = await _service.GetToiletsByCity(city);
-			var result2 = await _service.GetToiletsByCity(city);
-
-			// Assert
-			Assert.NotNull(result1);
-			Assert.NotNull(result2);
-			Assert.Same(result1, result2); // Sollte dasselbe gecachte Objekt sein
-			_mockGeocodingService.Verify(x => x.GetCityBoundingBoxAsync(city), Times.Once); // Nur einmal aufgerufen
-		}
-
-		[Fact]
 		public async Task GetToiletsByCity_WithDifferentCities_ShouldReturnDifferentResults()
 		{
 			// Arrange
@@ -489,26 +451,26 @@ namespace WaterDropTests.IntegrationsTests
 			var toilets = new List<ToiletData>();
 			for (int i = 0; i < 50; i++)
 			{
-				toilets.Add(new ToiletData 
-				{ 
-					Id = Guid.NewGuid(), 
-					ElementId = i, 
-					Lat = 48.1 + (i * 0.001), 
-					Lon = 11.5 + (i * 0.001), 
-					Type = "node", 
-					Tags = new() 
+				toilets.Add(new ToiletData
+				{
+					Id = Guid.NewGuid(),
+					ElementId = i,
+					Lat = 48.1 + (i * 0.001),
+					Lon = 11.5 + (i * 0.001),
+					Type = "node",
+					Tags = new()
 				}); // Innerhalb
 			}
 			for (int i = 50; i < 100; i++)
 			{
-				toilets.Add(new ToiletData 
-				{ 
-					Id = Guid.NewGuid(), 
-					ElementId = i, 
-					Lat = 50.0 + (i * 0.001), 
-					Lon = 8.0 + (i * 0.001), 
-					Type = "node", 
-					Tags = new() 
+				toilets.Add(new ToiletData
+				{
+					Id = Guid.NewGuid(),
+					ElementId = i,
+					Lat = 50.0 + (i * 0.001),
+					Lon = 8.0 + (i * 0.001),
+					Type = "node",
+					Tags = new()
 				}); // Außerhalb
 			}
 			_context.Toilets.AddRange(toilets);
@@ -534,7 +496,7 @@ namespace WaterDropTests.IntegrationsTests
 		{
 			// Arrange
 			var city = "UnknownCity";
-			
+
 			_mockGeocodingService
 				.Setup(x => x.GetCityBoundingBoxAsync(city))
 				.ReturnsAsync((BoundingBox)null);
@@ -568,7 +530,6 @@ namespace WaterDropTests.IntegrationsTests
 		public void Dispose()
 		{
 			_context?.Dispose();
-			(_cache as IDisposable)?.Dispose();
 		}
 	}
 }

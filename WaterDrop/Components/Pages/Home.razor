@@ -4,7 +4,6 @@
 @using Microsoft.Extensions.Caching.Memory
 @inject IJSRuntime JS
 @inject kloService kloService
-@inject IMemoryCache Cache
 @inject IWebHostEnvironment WebHostEnv
 @implements IAsyncDisposable
 @rendermode InteractiveServer
@@ -421,12 +420,7 @@
 
         try
         {
-            var amenityType = category == "drinking_water" ? "drinking_water" : "toilets";
-            var queryBuilder = new ToiletQueryBuilder()
-                .SetCity(cityInput)
-                .SetTimeout(25)
-                .SetAmenityType(amenityType);
-            var fetchResult = await kloService.GetToilets(queryBuilder);
+            var fetchResult = await kloService.GetToiletsByCity(cityInput);
 
             var elementDtos = new List<object>();
             foreach (var e in fetchResult.Elements)
@@ -740,17 +734,6 @@
         return ValueTask.CompletedTask;
     }
 
-    private void ClearCache()
-    {
-        var cities = new[] { "hamburg", "berlin", "köln", "münchen", "dortmund" };
-        foreach (var city in cities)
-        {
-            Cache.Remove($"toilets_{city}");
-            Cache.Remove($"bbox_{city}");
-        }
-        Console.WriteLine("Cache gelöscht!");
-    }
-
     /// <summary>
     /// Manuelle Aktualisierung: löscht den Cache-Eintrag für die aktuell
     /// angezeigte Stadt und lädt frische Daten aus der DB. Wird vom
@@ -769,10 +752,6 @@
         // tatsächlich verwendeten Cache-Key treffen ("hamburg" → "Hamburg").
         var city = cityInput.Trim();
         city = char.ToUpper(city[0]) + city.Substring(1).ToLower();
-
-        Cache.Remove($"toilets_{city}");
-        Console.WriteLine($"Cache für '{city}' geleert — lade frische Daten.");
-
         await SearchAllActive();
     }
 

@@ -1,5 +1,4 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Moq;
 using WaterDrop.Components.Data;
@@ -13,7 +12,6 @@ namespace WaterDropTests.UnitTests
 	{
 		private readonly ApplicationDbContext _context;
 		private readonly kloService _service;
-		private readonly IMemoryCache _cache;
 		private readonly Mock<ILogger<kloService>> _mockLogger;
 		private readonly Mock<IGeocodingService> _mockGeocodingService;
 
@@ -22,13 +20,12 @@ namespace WaterDropTests.UnitTests
 			var options = new DbContextOptionsBuilder<ApplicationDbContext>()
 				.UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
 				.Options;
-			
-			_cache = new MemoryCache(new MemoryCacheOptions());
+
 			_mockLogger = new Mock<ILogger<kloService>>();
 			_mockGeocodingService = new Mock<IGeocodingService>();
-			
+
 			_context = new ApplicationDbContext(options);
-			_service = new kloService(_context, _cache, _mockLogger.Object, _mockGeocodingService.Object);
+			_service = new kloService(_context, _mockLogger.Object, _mockGeocodingService.Object);
 		}
 
 		[Fact]
@@ -85,7 +82,7 @@ namespace WaterDropTests.UnitTests
 			var klo1 = CreateTestKloModel("Kommentar 1", 111111);
 			var klo2 = CreateTestKloModel("Kommentar 2", 222222);
 			var klo3 = CreateTestKloModel("Kommentar 3", 333333);
-			
+
 			await _service.AddKloCommentToData(klo1);
 			await _service.AddKloCommentToData(klo2);
 			await _service.AddKloCommentToData(klo3);
@@ -205,35 +202,6 @@ namespace WaterDropTests.UnitTests
 			_mockGeocodingService.Verify(x => x.GetCityBoundingBoxAsync("Hamburg"), Times.Once);
 		}
 
-		[Fact]
-		public async Task GetToiletsByCity_ShouldUseCacheOnSecondCall()
-		{
-			// Arrange
-			var city = "Berlin";
-			var bbox = new BoundingBox
-			{
-				MinLat = 52.338,
-				MaxLat = 52.676,
-				MinLon = 13.088,
-				MaxLon = 13.761,
-				DisplayName = "Berlin, Deutschland"
-			};
-
-			_mockGeocodingService
-				.Setup(x => x.GetCityBoundingBoxAsync(city))
-				.ReturnsAsync(bbox);
-
-			// Act
-			var result1 = await _service.GetToiletsByCity(city);
-			var result2 = await _service.GetToiletsByCity(city);
-
-			// Assert
-			Assert.NotNull(result1);
-			Assert.NotNull(result2);
-			Assert.Same(result1, result2); // Sollte dasselbe gecachte Objekt sein
-			_mockGeocodingService.Verify(x => x.GetCityBoundingBoxAsync(city), Times.Once); // Nur einmal aufgerufen
-		}
-
 		// ===== Regressionstest: drinking_water-Filter zeigt 0 =====
 		//
 		// Vorher hat `GetToiletsByCity` direkt projiziert
@@ -251,8 +219,10 @@ namespace WaterDropTests.UnitTests
 			var city = "Hamburg";
 			var bbox = new BoundingBox
 			{
-				MinLat = 53.395, MaxLat = 53.745,
-				MinLon = 9.731,  MaxLon = 10.325,
+				MinLat = 53.395,
+				MaxLat = 53.745,
+				MinLon = 9.731,
+				MaxLon = 10.325,
 				DisplayName = "Hamburg, Deutschland"
 			};
 
@@ -267,18 +237,24 @@ namespace WaterDropTests.UnitTests
 			_context.Toilets.AddRange(
 				new ToiletData
 				{
-					Id = Guid.NewGuid(), ElementId = 10001,
-					Lat = 53.55, Lon = 10.0, Type = "node",
+					Id = Guid.NewGuid(),
+					ElementId = 10001,
+					Lat = 53.55,
+					Lon = 10.0,
+					Type = "node",
 					Tags = new Dictionary<string, string> { ["amenity"] = "toilets" }
 				},
 				new ToiletData
 				{
-					Id = Guid.NewGuid(), ElementId = 10002,
-					Lat = 53.60, Lon = 10.0, Type = "node",
+					Id = Guid.NewGuid(),
+					ElementId = 10002,
+					Lat = 53.60,
+					Lon = 10.0,
+					Type = "node",
 					Tags = new Dictionary<string, string>
 					{
 						["amenity"] = "drinking_water",
-						["name"]    = "Stadtpark Trinkbrunnen"
+						["name"] = "Stadtpark Trinkbrunnen"
 					}
 				}
 			);
@@ -392,7 +368,7 @@ namespace WaterDropTests.UnitTests
 			Assert.Equal(3, result.Count);
 			Assert.Equal("Dritter", result[0].Comment);  // neueste zuerst
 			Assert.Equal("Zweiter", result[1].Comment);
-			Assert.Equal("Erster",  result[2].Comment);
+			Assert.Equal("Erster", result[2].Comment);
 		}
 
 		[Fact]
@@ -421,7 +397,6 @@ namespace WaterDropTests.UnitTests
 		{
 			_context.Database.EnsureDeleted();
 			_context.Dispose();
-			_cache.Dispose();
 		}
 	}
 }

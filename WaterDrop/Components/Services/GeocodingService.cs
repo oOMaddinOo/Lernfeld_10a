@@ -1,12 +1,13 @@
-using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Logging;
-
 namespace WaterDrop.Components.Services
 {
 	public class GeocodingService : IGeocodingService
 	{
-		private readonly IMemoryCache _cache;
 		private readonly ILogger<GeocodingService> _logger;
+
+		public GeocodingService(ILogger<GeocodingService> logger)
+		{
+			_logger = logger;
+		}
 
 		private static readonly Dictionary<string, BoundingBox> StaticBoundingBoxes = new(StringComparer.OrdinalIgnoreCase)
 		{
@@ -126,16 +127,10 @@ namespace WaterDrop.Components.Services
 			["Fulda"] = new BoundingBox { MinLat = 50.528, MaxLat = 50.579, MinLon = 9.647, MaxLon = 9.714, DisplayName = "Fulda, Hessen, Deutschland" },
 		};
 
-		public GeocodingService(IMemoryCache cache, ILogger<GeocodingService> logger)
-		{
-			_cache = cache;
-			_logger = logger;
-		}
-
 		public Task<BoundingBox?> GetCityBoundingBoxAsync(string city)
 		{
 			_logger.LogInformation("GetCityBoundingBoxAsync aufgerufen mit: '{City}'", city);
-			
+
 			if (StaticBoundingBoxes.TryGetValue(city, out var staticBBox))
 			{
 				_logger.LogInformation("Statische Bounding Box für {City} gefunden: {BBox}", city, staticBBox);
@@ -154,10 +149,5 @@ namespace WaterDrop.Components.Services
 		public double MinLon { get; set; }
 		public double MaxLon { get; set; }
 		public string DisplayName { get; set; }
-
-		public override string ToString()
-		{
-			return $"[{MinLat:F4},{MinLon:F4}] → [{MaxLat:F4},{MaxLon:F4}]";
-		}
 	}
 }

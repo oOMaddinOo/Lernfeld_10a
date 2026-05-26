@@ -1,6 +1,4 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Logging;
 using WaterDrop.Components.Data;
 using WaterDrop.Components.Models;
 
@@ -9,18 +7,15 @@ namespace WaterDrop.Components.Services
 	public class kloService
 	{
 		private readonly ApplicationDbContext _context;
-		private readonly IMemoryCache _cache;
 		private readonly ILogger<kloService> _logger;
 		private readonly IGeocodingService _geocodingService;
-		
+
 		public kloService(
-			ApplicationDbContext context, 
-			IMemoryCache cache,
+			ApplicationDbContext context,
 			ILogger<kloService> logger,
 			IGeocodingService geocodingService)
 		{
 			_context = context;
-			_cache = cache;
 			_logger = logger;
 			_geocodingService = geocodingService;
 		}
@@ -28,27 +23,15 @@ namespace WaterDrop.Components.Services
 		public async Task<KloModel> GetToiletsByCity(string city)
 		{
 			_logger.LogInformation("GetToiletsByCity aufgerufen mit: '{City}'", city);
-			
+
 			if (string.IsNullOrWhiteSpace(city))
 			{
 				city = "Hamburg";
 				_logger.LogWarning("Keine Stadt angegeben - nutze Default: Hamburg");
 			}
-			
-			var cacheKey = $"toilets_{city}";
-			
-			_logger.LogInformation("Cache-Key: {CacheKey}", cacheKey);
-			
-			if (_cache.TryGetValue<KloModel>(cacheKey, out var cachedResult))
-			{
-				_logger.LogInformation("Cache HIT für {City} - {Count} Toiletten", city, cachedResult.Elements.Count);
-				return cachedResult;
-			}
-
-			_logger.LogInformation("Cache MISS - lade Daten für {City}", city);
 
 			var bbox = await _geocodingService.GetCityBoundingBoxAsync(city);
-			
+
 			if (bbox == null)
 			{
 				_logger.LogWarning("Keine Bounding Box für {City} gefunden - nutze Default (Hamburg)", city);
@@ -63,21 +46,9 @@ namespace WaterDrop.Components.Services
 			}
 
 			_logger.LogInformation("Bounding Box für {City}: {BBox}", city, bbox);
-
-			// WICHTIG: Wir materialisieren die ToiletData-Entitäten ZUERST
-			// (ToListAsync) und projizieren erst danach im Speicher auf Element.
-			//
-			// Warum: `ToiletData.Tags` ist `[NotMapped]` und sein Getter liest
-			// intern `TagsJson`. Wenn man `Tags = t.Tags` direkt in einer EF-
-			// Projektion verwendet, kann EF Core die TagsJson-Spalte aus dem
-			// SELECT wegoptimieren — dann landet im Element ein leeres Tags
-			// und `classifyElement` in map.js kann amenity=drinking_water nicht
-			// erkennen → Filter zeigt 0. Materialisieren erzwingt, dass die
-			// gesamte Zeile inkl. TagsJson aus SQL kommt, sodass der Getter
-			// das JSON deserialisieren kann.
 			var rawToilets = await _context.Toilets
 				.Where(t => t.Lat >= bbox.MinLat && t.Lat <= bbox.MaxLat &&
-				            t.Lon >= bbox.MinLon && t.Lon <= bbox.MaxLon)
+							t.Lon >= bbox.MinLon && t.Lon <= bbox.MaxLon)
 				.AsNoTracking()
 				.ToListAsync();
 
@@ -92,12 +63,6 @@ namespace WaterDrop.Components.Services
 					Tags = t.Tags ?? new Dictionary<string, string>()
 				})
 				.ToList();
-
-			// Diagnostik: aufschlüsseln nach amenity-Typ, damit man im Log
-			// sofort sieht, ob die DB drinking_water-Reihen liefert. Wenn
-			// "amenity=drinking_water" hier > 0 ist, aber das UI 0 zeigt,
-			// liegt das Problem im Frontend (Cache/JS). Wenn es schon hier
-			// 0 ist, liegt es an den Daten in der Datenbank.
 			var byAmenity = toilets
 				.GroupBy(e => e.Tags != null && e.Tags.TryGetValue("amenity", out var a) ? a : "(none)")
 				.ToDictionary(g => g.Key, g => g.Count());
@@ -112,42 +77,7 @@ namespace WaterDrop.Components.Services
 			{
 				Elements = toilets
 			};
-
-			// Cache für 7 Tage (unverändert gegenüber der Originallogik —
-			// die lange TTL ist absichtlich, damit die Startseite nicht
-			// bei jedem Besuch die DB anfragt). Wenn frisch geseedete
-			// Daten sofort sichtbar werden müssen, nutzt der User den
-			// bereits existierenden "Frische Daten laden"-Button in der
-			// Sidebar, der den Cache-Eintrag für die aktuelle Stadt
-			// gezielt entfernt.
-			_cache.Set(cacheKey, result, TimeSpan.FromDays(7));
-			_logger.LogInformation("Ergebnis für {City} gecacht", city);
-
 			return result;
-		}
-
-		/// <summary>
-		/// Entfernt ALLE gecachten KloModel-Einträge (für alle Städte).
-		/// Wird beim App-Start aufgerufen, damit ein Neustart garantiert
-		/// frische Daten aus der DB lädt — wichtig nach dem Einspielen
-		/// neuer Seed-Daten wie z. B. seed-drinking-water-hamburg.sql.
-		/// Im MemoryCache gibt es keine direkte "alles löschen"-Methode,
-		/// also iterieren wir über die bekannten Stadt-Schlüssel.
-		/// </summary>
-		public void ClearAllCityCaches()
-		{
-			// Bekannte Cache-Keys folgen dem Schema "toilets_{City}".
-			// Wir löschen einfach alle Städte aus dem GeocodingService.
-			foreach (var cityKey in new[]
-			{
-				"Berlin","Hamburg","München","Köln","Frankfurt","Stuttgart",
-				"Düsseldorf","Dortmund","Essen","Leipzig","Bremen","Dresden",
-				"Hannover","Nürnberg","Duisburg"
-			})
-			{
-				_cache.Remove($"toilets_{cityKey}");
-			}
-			_logger.LogInformation("Alle Stadt-Caches geleert.");
 		}
 
 		/// <summary>
@@ -204,8 +134,8 @@ namespace WaterDrop.Components.Services
 			//    aber außerhalb der Hamburg-Koordinaten liegen.
 			var dwInHamburg = await _context.Toilets
 				.Where(t => t.TagsJson != null && EF.Functions.Like(t.TagsJson, dwLike)
-				         && t.Lat >= 53.395 && t.Lat <= 53.745
-				         && t.Lon >= 9.731  && t.Lon <= 10.325)
+						 && t.Lat >= 53.395 && t.Lat <= 53.745
+						 && t.Lon >= 9.731 && t.Lon <= 10.325)
 				.CountAsync();
 
 			// 4) Beispiel-ElementIds, damit man im UI sieht, ob es genau die
@@ -232,43 +162,6 @@ namespace WaterDrop.Components.Services
 				$"Beispiel-IDs: [{string.Join(", ", sampleIds)}]";
 		}
 
-		public async Task<KloModel> GetToilets(ToiletQueryBuilder queryBuilder)
-		{
-			var query = queryBuilder.Build();
-			var city = ExtractCityFromQuery(query);
-			_logger.LogInformation("GetToilets (via QueryBuilder) - extrahierte Stadt: '{City}'", city);
-			return await GetToiletsByCity(city);
-		}
-
-		private string ExtractCityFromQuery(string query)
-		{
-			var patterns = new[]
-			{
-				@"area\[""name""\]\s*=\s*""([^""]+)""",
-				@"area\[name\]\s*=\s*""([^""]+)""",
-				@"""name""\s*=\s*""([^""]+)""",
-			};
-
-			foreach (var pattern in patterns)
-			{
-				var match = System.Text.RegularExpressions.Regex.Match(
-					query, 
-					pattern,
-					System.Text.RegularExpressions.RegexOptions.IgnoreCase
-				);
-
-				if (match.Success)
-				{
-					var city = match.Groups[1].Value;
-					_logger.LogInformation("Stadt extrahiert (Pattern: {Pattern}): '{City}'", pattern, city);
-					return city;
-				}
-			}
-			
-			_logger.LogWarning("Keine Stadt im Query gefunden - nutze Default 'Hamburg'");
-			return "Hamburg";
-		}
-		
 		/// <summary>
 		/// Gibt den NEUESTEN Review für eine ElementId zurück. Mehrere Reviews
 		/// pro Ort sind erlaubt — wir sortieren absteigend nach CreatedAt
