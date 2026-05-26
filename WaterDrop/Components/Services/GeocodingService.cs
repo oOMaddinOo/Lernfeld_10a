@@ -145,6 +145,8 @@ namespace WaterDrop.Components.Services
 			_logger.LogWarning("Stadt '{City}' nicht in statischer Liste gefunden", city);
 			return Task.FromResult<BoundingBox?>(null);
 		}
+
+		public IReadOnlyDictionary<string, BoundingBox> GetAllCities() => StaticBoundingBoxes;
 	}
 
 	public class BoundingBox
