@@ -254,6 +254,43 @@
     font-family: system-ui, -apple-system, sans-serif;
 }
 
+/* ===== Search This Area Pill ===== */
+.wd-search-area-pill {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    color: #3461C1;
+    border: none;
+    border-radius: 24px;
+    padding: 10px 22px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: system-ui, -apple-system, sans-serif;
+    cursor: pointer;
+    z-index: 1001;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    transition: background 0.15s, box-shadow 0.15s;
+    animation: wd-pill-in 0.2s ease;
+}
+
+.wd-search-area-pill:hover {
+    background: #f0f4ff;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.22);
+}
+
+@keyframes wd-pill-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@media (max-width: 768px) {
+    .wd-search-area-pill {
+        top: 60px;
+    }
+}
+
 /* ===== Mobile: hide desktop elements ===== */
 .wd-mobile-topbar {
     display: none;
@@ -787,5 +824,224 @@
     .wd-history-panel.open {
         right: 0;
         bottom: 0;
+    }
+}
+
+/* ===== Facility Detail Card ===== */
+.wd-detail-card {
+    position: fixed;
+    bottom: 24px;
+    left: 256px;
+    width: 320px;
+    background: white;
+    border-radius: 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15), 0 0 0 0.5px rgba(0,0,0,0.06);
+    z-index: 1100;
+    padding: 16px 18px 14px;
+    font-family: system-ui, -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    animation: wd-card-in 0.2s ease;
+}
+
+@keyframes wd-card-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.wd-detail-close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: #999;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.wd-detail-close:hover {
+    color: #333;
+}
+
+.wd-detail-type {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #888;
+}
+
+.wd-detail-type-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.wd-detail-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a1a;
+    line-height: 1.3;
+    padding-right: 24px;
+}
+
+.wd-detail-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 13px;
+    color: #555;
+    line-height: 1.4;
+}
+
+.wd-detail-row-icon {
+    flex-shrink: 0;
+    font-size: 13px;
+}
+
+.wd-detail-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.wd-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.wd-badge-green {
+    background: rgba(91, 168, 90, 0.12);
+    color: #3d7a3c;
+}
+
+.wd-badge-amber {
+    background: rgba(232, 160, 48, 0.12);
+    color: #9a6a1a;
+}
+
+.wd-badge-blue {
+    background: rgba(52, 97, 193, 0.10);
+    color: #3461C1;
+}
+
+.wd-detail-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+    border-top: 1px solid rgba(0,0,0,0.06);
+    padding-top: 10px;
+}
+
+.wd-detail-action {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 8px 4px;
+    border: none;
+    background: rgba(0,0,0,0.03);
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    color: #3461C1;
+    font-family: system-ui, -apple-system, sans-serif;
+    text-decoration: none;
+    transition: background 0.15s;
+}
+
+.wd-detail-action:hover {
+    background: rgba(52, 97, 193, 0.08);
+}
+
+.wd-detail-action-icon {
+    font-size: 18px;
+}
+
+.wd-detail-distance {
+    font-size: 12px;
+    color: #3461C1;
+    font-weight: 500;
+}
+
+/* ===== Nearby List in Sidebar ===== */
+.wd-nearby-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.wd-nearby-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    font-family: system-ui, -apple-system, sans-serif;
+    transition: background 0.12s;
+    width: 100%;
+}
+
+.wd-nearby-item:hover {
+    background: rgba(0,0,0,0.04);
+}
+
+.wd-nearby-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.wd-nearby-info {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.wd-nearby-name {
+    font-size: 12px;
+    color: #1a1a1a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wd-nearby-dist {
+    font-size: 11px;
+    color: #888;
+    flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+    .wd-detail-card {
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        width: auto;
     }
 }

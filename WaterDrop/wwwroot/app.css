@@ -61,3 +61,43 @@ h1:focus {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+
+/* ===== User Location: Pulsing Blue Dot (Google Maps style) ===== */
+@keyframes wd-pulse {
+    0%   { transform: translate(-50%, -50%) scale(1);   opacity: 0.6; }
+    70%  { transform: translate(-50%, -50%) scale(2.8); opacity: 0; }
+    100% { transform: translate(-50%, -50%) scale(2.8); opacity: 0; }
+}
+
+.wd-user-loc {
+    position: relative;
+    width: 18px;
+    height: 18px;
+}
+
+.wd-user-loc-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 14px;
+    height: 14px;
+    transform: translate(-50%, -50%);
+    background: #4285F4;
+    border: 2.5px solid white;
+    border-radius: 50%;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    z-index: 2;
+}
+
+.wd-user-loc-pulse {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 14px;
+    height: 14px;
+    transform: translate(-50%, -50%);
+    background: #4285F4;
+    border-radius: 50%;
+    animation: wd-pulse 2s ease-out infinite;
+    z-index: 1;
+}
