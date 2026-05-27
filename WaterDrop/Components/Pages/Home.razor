@@ -36,6 +36,16 @@
         <div class="wd-geo-status">@statusText</div>
     }
 
+    @* Diagnose-Banner: zeigt die tatsächliche Exception, wenn das Laden der
+       Daten fehlschlägt. So ist die Ursache (z. B. DB-Verbindung auf Azure)
+       direkt im Browser sichtbar, ohne Server-Logs lesen zu müssen. *@
+    @if (!string.IsNullOrEmpty(lastErrorDetail))
+    {
+        <div class="wd-geo-status" style="white-space:pre-wrap; font-size:11px; color:#b00020;">
+            ⚠ @lastErrorDetail
+        </div>
+    }
+
     <div class="wd-filters-label">FILTERS</div>
 
     <div class="wd-filter-rows">
@@ -492,7 +502,8 @@
                 errorStates[cat] = "Error loading";
                 loadingStates[cat] = false;
             }
-            Console.WriteLine($"Error fetching categories: {ex.Message}");
+            lastErrorDetail = FormatError(ex);
+            Console.WriteLine($"Error fetching categories: {lastErrorDetail}");
         }
 
         StateHasChanged();
@@ -538,6 +549,7 @@
             loadingStates[cat] = true;
             errorStates[cat] = "";
         }
+        lastErrorDetail = null;
         StateHasChanged();
 
         try
@@ -607,7 +619,8 @@
         catch (Exception ex)
         {
             errorStates[category] = "Error loading";
-            Console.WriteLine($"Error fetching {category}: {ex.Message}");
+            lastErrorDetail = FormatError(ex);
+            Console.WriteLine($"Error fetching {category}: {lastErrorDetail}");
         }
         finally
         {
@@ -969,6 +982,19 @@
 
     // Debug-Anzeige für die DB-Statistik (siehe RunDebugStats unten).
     private string debugStatsText = string.Empty;
+
+    // Diagnose: die zuletzt aufgetretene Lade-Exception, im UI-Banner sichtbar.
+    private string? lastErrorDetail;
+
+    // Formatiert Exception-Typ + Message (inkl. innerer Exception, die bei
+    // DB-Fehlern die eigentliche Ursache enthält — z. B. die SqlException).
+    private static string FormatError(Exception ex)
+    {
+        var msg = $"{ex.GetType().Name}: {ex.Message}";
+        if (ex.InnerException != null)
+            msg += $"  →  {ex.InnerException.GetType().Name}: {ex.InnerException.Message}";
+        return msg;
+    }
 
     /// <summary>
     /// Liest direkt aus der Datenbank, wie viele drinking_water-Datensätze
